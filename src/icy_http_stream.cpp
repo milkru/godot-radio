@@ -141,7 +141,6 @@ Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse
 	thread_done.clear();
 	thread_request_quit.clear();
 	result_emitted.clear();
-	client->set_blocking_mode(true);
 
 	thread->start(callable_mp(this, &IcyHttpStream::_thread_func));
 
@@ -152,11 +151,15 @@ void IcyHttpStream::cancel_request() {
 	if (!is_requesting()) { return; }
 
 	thread_request_quit.set();
+	{
+		std::lock_guard<std::mutex> lock(client_mutex);
+		client->close();
+	}
+
 	if (thread.is_valid() && thread->is_started()) {
 		thread->wait_to_finish();
 	}
 
-	client->close();
 	requesting = false;
 	got_response = false;
 	response_code = 0;
@@ -202,7 +205,11 @@ Dictionary IcyHttpStream::get_response_headers_as_dictionary() const {
 }
 
 void IcyHttpStream::_thread_func() {
-	Error err = _request();
+	Error err;
+	{
+		std::lock_guard<std::mutex> lock(client_mutex);
+		err = _request();
+	}
 
 	if (err != OK) {
 		_defer_done(RESULT_CANT_CONNECT);
@@ -224,6 +231,7 @@ void IcyHttpStream::_thread_func() {
 }
 
 bool IcyHttpStream::_update_connection() {
+	std::lock_guard<std::mutex> lock(client_mutex);
 	HTTPClient::Status current_status = client->get_status();
 
 	switch(current_status) {

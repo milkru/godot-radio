@@ -34,6 +34,7 @@ private:
 	};
 
 	std::mutex decoder_mutex;
+	std::mutex client_mutex;
 
 	Ref<HTTPClient> client;
 	Ref<TLSOptions> tls_options;
