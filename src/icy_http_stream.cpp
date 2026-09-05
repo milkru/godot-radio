@@ -47,10 +47,13 @@ void IcyHttpStream::_bind_methods() {
 
 Error IcyHttpStream::_parse_url(const String &p_url) {
 	use_tls = false;
-	requesting = false;
-	got_response = false;
+	requesting.clear();
+	got_response.clear();
 	request_string = "";
-	content_type = "";
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		content_type = "";
+	}
 	url = "";
 	port = 0;
 	redirections = 0;
@@ -114,7 +117,7 @@ Error IcyHttpStream::_request() {
 }
 
 Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
-	if (requesting) { return ERR_BUSY; }
+	if (requesting.is_set()) { return ERR_BUSY; }
 
 	Error err = _parse_url(p_url);
 	if (err != OK) { return err; }
@@ -131,13 +134,16 @@ Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse
 	}
 	request_headers.append_array(p_custom_headers);
 
-	icy_metaint = 0;
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		icy_metaint = 0;
+	}
 	audio_bytes_until_meta = 0;
 	meta_bytes_remaining = 0;
 	meta_state = MetaState::AUDIO;
 	metadata_buffer.clear();
 
-	requesting = true;
+	requesting.set();
 	thread_done.clear();
 	thread_request_quit.clear();
 	result_emitted.clear();
@@ -160,9 +166,12 @@ void IcyHttpStream::cancel_request() {
 		thread->wait_to_finish();
 	}
 
-	requesting = false;
-	got_response = false;
-	response_code = 0;
+	requesting.clear();
+	got_response.clear();
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		response_code = 0;
+	}
 
 	if (!result_emitted.is_set()) {
 		_defer_done(RESULT_CANCELLED);
@@ -170,10 +179,11 @@ void IcyHttpStream::cancel_request() {
 }
 
 bool IcyHttpStream::is_requesting() const {
-	return requesting;
+	return requesting.is_set();
 }
 
 String IcyHttpStream::get_content_mime_type() const {
+	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return content_type;
 }
 
@@ -183,6 +193,7 @@ void IcyHttpStream::set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder) {
 }
 
 PackedStringArray IcyHttpStream::get_response_headers() const {
+	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return response_headers;
 }
 
@@ -191,6 +202,7 @@ int IcyHttpStream::get_downloaded_bytes() const {
 }
 
 Dictionary IcyHttpStream::get_response_headers_as_dictionary() const {
+	std::lock_guard<std::mutex> lock(response_state_mutex);
 	Dictionary dict;
 
 	for (int i = 0; i < response_headers.size(); ++i) {
@@ -254,7 +266,7 @@ bool IcyHttpStream::_update_connection() {
 			return true;
 		}
 		case HTTPClient::STATUS_CONNECTED: {
-			if (got_response) {
+			if (got_response.is_set()) {
 				// reached end of chunked transfer or standard stream (unlikely for icecast unless it disconnects)
 				_defer_done(RESULT_STREAM_FINISHED);
 				return true;
@@ -266,11 +278,16 @@ bool IcyHttpStream::_update_connection() {
 				return true;
 			}
 
-			got_response = true;
+			got_response.set();
 			return false;
 		}
 		case HTTPClient::STATUS_BODY: {
-			if (got_response && response_code == 0) {
+			bool response_pending;
+			{
+				std::lock_guard<std::mutex> lock(response_state_mutex);
+				response_pending = response_code == 0;
+			}
+			if (got_response.is_set() && response_pending) {
 				bool ret_value;
 				if (_handle_response(&ret_value)) {
 					return ret_value;
@@ -308,11 +325,15 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		return true;
 	}
 
-	response_headers.clear();
-	response_headers = client->get_response_headers();
-	response_code = client->get_response_code();
+	PackedStringArray new_headers = client->get_response_headers();
+	int new_response_code = client->get_response_code();
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		response_headers = new_headers;
+		response_code = new_response_code;
+	}
 
-	if (response_code == 301 || response_code == 302) {
+	if (new_response_code == 301 || new_response_code == 302) {
 		if (max_redirections >= 0 && redirections >= max_redirections) {
 			_defer_done(RESULT_REDIRECT_LIMIT_REACHED);
 			*ret_value = true;
@@ -320,9 +341,9 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		}
 
 		String new_request;
-		for (int i = 0; i < response_headers.size(); ++i) {
-			if (response_headers[i].to_lower().begins_with("location: ")) {
-				new_request = response_headers[i].substr(10).strip_edges();
+		for (int i = 0; i < new_headers.size(); ++i) {
+			if (new_headers[i].to_lower().begins_with("location: ")) {
+				new_request = new_headers[i].substr(10).strip_edges();
 			}
 		}
 
@@ -337,8 +358,11 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 
 			Error err = _request();
 			if (err == OK) {
-				got_response = false;
-				response_code = 0;
+				got_response.clear();
+				{
+					std::lock_guard<std::mutex> lock(response_state_mutex);
+					response_code = 0;
+				}
 				downloaded.set(0);
 				redirections = updated_redirs;
 				*ret_value = false;
@@ -350,19 +374,21 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 	bool found_content_type = false;
 	bool found_icy_metaint = !parse_icy_metadata;
 
-	for (int i = 0; i < response_headers.size(); ++i) {
-		String lower_header = response_headers[i].to_lower();
+	for (int i = 0; i < new_headers.size(); ++i) {
+		String lower_header = new_headers[i].to_lower();
 
 		if (!found_content_type && lower_header.begins_with("content-type:")) {
-			PackedStringArray parts = response_headers[i].split(":", false, 1);
+			PackedStringArray parts = new_headers[i].split(":", false, 1);
 			if (parts.size() > 1) {
+				std::lock_guard<std::mutex> lock(response_state_mutex);
 				content_type = parts[1].strip_edges();
 			}
 			found_content_type = true;
 		}
 		else if (!found_icy_metaint && lower_header.begins_with("icy-metaint:")) {
-			PackedStringArray parts = response_headers[i].split(":", false, 1);
+			PackedStringArray parts = new_headers[i].split(":", false, 1);
 			if (parts.size() > 1) {
+				std::lock_guard<std::mutex> lock(response_state_mutex);
 				icy_metaint = parts[1].to_int();
 				audio_bytes_until_meta = icy_metaint;
 			}

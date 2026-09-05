@@ -35,6 +35,7 @@ private:
 
 	std::mutex decoder_mutex;
 	std::mutex client_mutex;
+	mutable std::mutex response_state_mutex;
 
 	Ref<HTTPClient> client;
 	Ref<TLSOptions> tls_options;
@@ -65,9 +66,9 @@ private:
 	SafeFlag thread_done;
 	SafeFlag thread_request_quit;
 	SafeFlag result_emitted;
+	SafeFlag requesting;
+	SafeFlag got_response;
 	bool use_tls = false;
-	bool requesting = false;
-	bool got_response = false;
 	bool parse_icy_metadata = false;
 
 	void _defer_connected();
