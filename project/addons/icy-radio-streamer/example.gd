@@ -38,10 +38,13 @@ func _ready() -> void:
 					var rate: int = icy_audio_decoder.get_stream_sample_rate()
 					print("Mix rate: %d Hz" % rate)
 					stream.mix_rate = rate
-					
-					var max_frames := int(stream.mix_rate * stream.buffer_length)
+
+					# re-attach the playback now that the generator's final mix_rate is known,
+					# so the decoder derives max buffer capacity from the generator itself
+					icy_audio_decoder.set_playback(radio_player.get_stream_playback(), stream)
+
 					var frames := int(stream.mix_rate / 2)
-					icy_audio_decoder.set_buffer_thresholds(frames, max_frames)
+					icy_audio_decoder.set_buffer_thresholds(frames)
 				)
 			_:
 				push_error("Unsupported format: " + content_mime_type)
