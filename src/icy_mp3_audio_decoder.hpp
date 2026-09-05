@@ -18,7 +18,7 @@ private:
 	std::deque<PackedByteArray> chunks;
 	std::vector<float> pcm_buffer;
 
-	size_t byte_threshold = 16384; // 1s at 128kbps
+	size_t byte_threshold = 16384; // 1s at 128kbps - lowest possible value, which is also dr_mp3's DRMP3_MIN_DATA_CHUNK_SIZE
 	size_t current_chunk_offset = 0;
 	size_t total_buffered_bytes = 0;
 

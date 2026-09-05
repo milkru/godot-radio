@@ -1,6 +1,7 @@
 #include "icy_mp3_audio_decoder.hpp"
 #include "godot_cpp/core/class_db.hpp"
 #include "godot_cpp/variant/packed_byte_array.hpp"
+#include <algorithm>
 
 #define DR_MP3_FLOAT_OUTPUT
 #define DR_MP3_IMPLEMENTATION
@@ -30,7 +31,8 @@ void IcyMp3AudioDecoder::_bind_methods() {
 
 void IcyMp3AudioDecoder::set_bitrate_hint(int p_kbps) {
 	if (p_kbps <= 0) { return; }
-	byte_threshold = (static_cast<size_t>(p_kbps) * 1000) / 8;
+	size_t computed = (static_cast<size_t>(p_kbps) * 1000) / 8;
+	byte_threshold = std::max(computed, static_cast<size_t>(DRMP3_MIN_DATA_CHUNK_SIZE));
 }
 
 int IcyMp3AudioDecoder::get_stream_sample_rate() const {
