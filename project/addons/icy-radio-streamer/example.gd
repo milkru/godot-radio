@@ -16,40 +16,42 @@ func _ready() -> void:
 	icy_http.connection_opened.connect(func():
 		var response_headers_dict := icy_http.get_response_headers_as_dictionary()
 		var content_mime_type := icy_http.get_content_mime_type()
-		
-		# create the appropriate decoder for the stream (currently only MP3 is supported)
-		match content_mime_type:
-			"audio/mpeg":
-				icy_audio_decoder = IcyMp3AudioDecoder.new()
-				
-				# (optional) check for bitrate information. 
-				# if it is unavailable the decoder assumes a standard 128 kbps MP3 stream
-				if response_headers_dict.has("icy-br"):
-					var kbps = int(response_headers_dict["icy-br"])
-					icy_audio_decoder.set_bitrate_hint(kbps)
-					print("Bitrate: %d kbps" % kbps)
-				
-				# wait for the decoder to detect the stream format information
-				icy_audio_decoder.stream_info_ready.connect(func():
-					# calculate the appropriate sample rate for the generator, 
-					# and buffer thresholds for the decoder.
-					# the sample rate could also be read from the response headers,
-					# but information obtained directly from the codec is more reliable
-					var rate: int = icy_audio_decoder.get_stream_sample_rate()
-					print("Mix rate: %d Hz" % rate)
-					stream.mix_rate = rate
 
-					# re-attach the playback now that the generator's final mix_rate is known,
-					# so the decoder derives max buffer capacity from the generator itself
-					icy_audio_decoder.set_playback(radio_player.get_stream_playback(), stream)
+		# ask the addon's decoder registry for a decoder matching the stream's content type.
+		# built-in decoders (currently just MP3) register themselves for their MIME type at
+		# extension init time, so a future native decoder module can add its own MIME type
+		# mapping without this script needing to change.
+		icy_audio_decoder = IcyAudioDecoder.create_for_mime_type(content_mime_type)
 
-					var frames := int(stream.mix_rate / 2)
-					icy_audio_decoder.set_buffer_thresholds(frames)
-				)
-			_:
-				push_error("Unsupported format: " + content_mime_type)
-				icy_http.cancel_request()
-				
+		if icy_audio_decoder:
+			# (optional) check for bitrate information.
+			# if it is unavailable the decoder assumes a standard 128 kbps MP3 stream
+			if response_headers_dict.has("icy-br") and icy_audio_decoder.has_method("set_bitrate_hint"):
+				var kbps = int(response_headers_dict["icy-br"])
+				icy_audio_decoder.set_bitrate_hint(kbps)
+				print("Bitrate: %d kbps" % kbps)
+
+			# wait for the decoder to detect the stream format information
+			icy_audio_decoder.stream_info_ready.connect(func():
+				# calculate the appropriate sample rate for the generator,
+				# and buffer thresholds for the decoder.
+				# the sample rate could also be read from the response headers,
+				# but information obtained directly from the codec is more reliable
+				var rate: int = icy_audio_decoder.get_stream_sample_rate()
+				print("Mix rate: %d Hz" % rate)
+				stream.mix_rate = rate
+
+				# re-attach the playback now that the generator's final mix_rate is known,
+				# so the decoder derives max buffer capacity from the generator itself
+				icy_audio_decoder.set_playback(radio_player.get_stream_playback(), stream)
+
+				var frames := int(stream.mix_rate / 2)
+				icy_audio_decoder.set_buffer_thresholds(frames)
+			)
+		else:
+			push_error("Unsupported format: " + content_mime_type)
+			icy_http.cancel_request()
+
 		if icy_audio_decoder:
 			# connect buffering signals to pause playback when no audio data is available
 			if not icy_audio_decoder.buffering_started.is_connected(on_buffering_started):

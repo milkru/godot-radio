@@ -21,6 +21,10 @@ IcyMp3AudioDecoder::~IcyMp3AudioDecoder() {
 	}
 }
 
+Ref<IcyAudioDecoder> IcyMp3AudioDecoder::create_instance() {
+	return memnew(IcyMp3AudioDecoder);
+}
+
 void IcyMp3AudioDecoder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_bitrate_hint", "kbps"), &IcyMp3AudioDecoder::set_bitrate_hint);
 	ClassDB::bind_method(D_METHOD("get_stream_sample_rate"), &IcyMp3AudioDecoder::get_stream_sample_rate);

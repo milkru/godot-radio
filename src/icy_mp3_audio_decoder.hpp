@@ -37,6 +37,7 @@ public:
 	IcyMp3AudioDecoder();
 	~IcyMp3AudioDecoder();
 
+	static Ref<IcyAudioDecoder> create_instance();
 	void set_bitrate_hint(int p_kbps);
 	int get_stream_sample_rate() const;
 	int get_stream_channels() const;

@@ -7,6 +7,8 @@
 
 using namespace godot;
 
+std::mutex IcyAudioDecoder::decoder_registry_mutex;
+
 void IcyAudioDecoder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_playback", "playback", "generator"), &IcyAudioDecoder::set_playback, DEFVAL(Ref<AudioStreamGenerator>()));
 	ClassDB::bind_method(D_METHOD("set_buffer_thresholds", "target_frames", "max_capacity_frames"), &IcyAudioDecoder::set_buffer_thresholds, DEFVAL(-1));
@@ -15,9 +17,42 @@ void IcyAudioDecoder::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_buffering"), &IcyAudioDecoder::get_is_buffering);
 	ClassDB::bind_method(D_METHOD("get_current_target_frames"), &IcyAudioDecoder::get_current_target_frames);
 	ClassDB::bind_method(D_METHOD("get_current_max_capacity_frames"), &IcyAudioDecoder::get_current_max_capacity_frames);
+	ClassDB::bind_static_method("IcyAudioDecoder", D_METHOD("create_for_mime_type", "mime_type"), &IcyAudioDecoder::create_for_mime_type);
 
 	ADD_SIGNAL(MethodInfo("buffering_started"));
 	ADD_SIGNAL(MethodInfo("buffering_finished"));
+}
+
+HashMap<String, IcyAudioDecoder::DecoderFactory>& IcyAudioDecoder::get_decoder_registry() {
+	static HashMap<String, DecoderFactory> registry;
+	return registry;
+}
+
+void IcyAudioDecoder::register_decoder(const String &p_mime_type, const DecoderFactory &p_factory) {
+	std::lock_guard<std::mutex> lock(decoder_registry_mutex);
+	get_decoder_registry()[p_mime_type] = p_factory;
+}
+
+Ref<IcyAudioDecoder> IcyAudioDecoder::create_for_mime_type(const String &p_mime_type) {
+	DecoderFactory factory;
+
+	{
+		std::lock_guard<std::mutex> lock(decoder_registry_mutex);
+		HashMap<String, DecoderFactory>& registry = get_decoder_registry();
+		HashMap<String, DecoderFactory>::Iterator it = registry.find(p_mime_type);
+
+		if (it == registry.end()) {
+			return Ref<IcyAudioDecoder>();
+		}
+
+		factory = it->value;
+	}
+
+	if (!factory) {
+		return Ref<IcyAudioDecoder>();
+	}
+
+	return factory();
 }
 
 real_t IcyAudioDecoder::get_buffering_progress() const {

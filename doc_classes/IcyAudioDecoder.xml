@@ -90,5 +90,13 @@
 				Returns the configured maximum buffer capacity, expressed in audio frames.
 			</description>
 		</method>
+
+		<method name="create_for_mime_type" qualifiers="static">
+			<return type="IcyAudioDecoder" />
+			<param index="0" name="mime_type" type="String" />
+			<description>
+				Creates and returns a new decoder instance for [code]mime_type[/code] (e.g. [code]"audio/mpeg"[/code]) using the decoder that was registered for it, or [code]null[/code] if no decoder is registered for that MIME type. Decoders register themselves at extension init time; use this instead of hand-rolling a content-type [code]match[/code], so a future decoder module can add support for its own MIME type without callers needing to change.
+			</description>
+		</method>
 	</methods>
 </class>
