@@ -17,7 +17,14 @@ IcyHttpStream::IcyHttpStream() {
 }
 
 IcyHttpStream::~IcyHttpStream() {
-	cancel_request();
+	thread_request_quit.set();
+	{
+		std::lock_guard<std::mutex> lock(client_mutex);
+		client->close();
+	}
+	if (thread.is_valid() && thread->is_started()) {
+		thread->wait_to_finish();
+	}
 }
 
 void IcyHttpStream::_bind_methods() {
@@ -45,19 +52,8 @@ void IcyHttpStream::_bind_methods() {
     BIND_ENUM_CONSTANT(RESULT_CANCELLED);
 }
 
-Error IcyHttpStream::_parse_url(const String &p_url) {
-	use_tls = false;
-	requesting.clear();
-	got_response.clear();
-	request_string = "";
-	{
-		std::lock_guard<std::mutex> lock(response_state_mutex);
-		content_type = "";
-	}
-	url = "";
-	port = 0;
-	redirections = 0;
-	downloaded.set(0);
+IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
+	ParsedUrl result;
 
 	String scheme;
 	String fragment;
@@ -74,15 +70,16 @@ Error IcyHttpStream::_parse_url(const String &p_url) {
 		scheme = parsed_url.substr(0, scheme_idx + 3);
 		parsed_url = parsed_url.substr(scheme_idx + 3);
 	} else {
-		return ERR_INVALID_PARAMETER;
+		result.error = ERR_INVALID_PARAMETER;
+		return result;
 	}
 
 	int path_idx = parsed_url.find("/");
 	if (path_idx != -1) {
-		request_string = parsed_url.substr(path_idx);
+		result.request_string = parsed_url.substr(path_idx);
 		parsed_url = parsed_url.substr(0, path_idx);
 	} else {
-		request_string = "/";
+		result.request_string = "/";
 	}
 
 	int port_idx = parsed_url.rfind(":");
@@ -90,26 +87,34 @@ Error IcyHttpStream::_parse_url(const String &p_url) {
 		// check for IPv6 brackets to ensure a colon from inside an IPv6 address won't be detected
 		int bracket_idx = parsed_url.rfind("]");
 		if (bracket_idx == -1 || port_idx > bracket_idx) {
-			port = parsed_url.substr(port_idx + 1).to_int();
-			url = parsed_url.substr(0, port_idx);
+			result.port = parsed_url.substr(port_idx + 1).to_int();
+			result.host = parsed_url.substr(0, port_idx);
 		} else {
-			url = parsed_url;
+			result.host = parsed_url;
 		}
 	} else {
-		url = parsed_url;
+		result.host = parsed_url;
 	}
 
 	if (scheme == "https://") {
-		use_tls = true;
+		result.use_tls = true;
 	} else if (scheme != "http://") {
-		return ERR_INVALID_PARAMETER;
+		result.error = ERR_INVALID_PARAMETER;
+		return result;
 	}
 
-	if (port == 0) {
-		port = use_tls ? 443 : 80;
+	if (result.port == 0) {
+		result.port = result.use_tls ? 443 : 80;
 	}
 
-	return OK;
+	return result;
+}
+
+void IcyHttpStream::_apply_parsed_url(const ParsedUrl &p_parsed) {
+	url = p_parsed.host;
+	port = p_parsed.port;
+	use_tls = p_parsed.use_tls;
+	request_string = p_parsed.request_string;
 }
 
 Error IcyHttpStream::_request() {
@@ -119,8 +124,24 @@ Error IcyHttpStream::_request() {
 Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
 	if (requesting.is_set()) { return ERR_BUSY; }
 
-	Error err = _parse_url(p_url);
-	if (err != OK) { return err; }
+	ParsedUrl parsed = _parse_url(p_url);
+	if (parsed.error != OK) { return parsed.error; }
+
+	if (thread->is_started()) {
+		thread->wait_to_finish();
+	}
+
+	_apply_parsed_url(parsed);
+
+	got_response.clear();
+	redirections = 0;
+	downloaded.set(0);
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		content_type = "";
+		response_code = 0;
+		response_headers.clear();
+	}
 
 	parse_icy_metadata = p_parse_metadata;
 	timeout_msec = static_cast<uint64_t>(p_timeout * 1000.0);
@@ -240,6 +261,8 @@ void IcyHttpStream::_thread_func() {
 			OS::get_singleton()->delay_usec(1000);
 		}
 	}
+
+	requesting.clear();
 }
 
 bool IcyHttpStream::_update_connection() {
@@ -351,7 +374,10 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 			client->close();
 			int updated_redirs = redirections + 1;
 			if (new_request.begins_with("http")) {
-				_parse_url(new_request);
+				ParsedUrl parsed = _parse_url(new_request);
+				if (parsed.error == OK) {
+					_apply_parsed_url(parsed);
+				}
 			} else {
 				request_string = new_request;
 			}

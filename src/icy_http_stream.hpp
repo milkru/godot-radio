@@ -33,6 +33,14 @@ private:
 		METADATA
 	};
 
+	struct ParsedUrl {
+		String host;
+		String request_string;
+		int port = 0;
+		bool use_tls = false;
+		Error error = OK;
+	};
+
 	std::mutex decoder_mutex;
 	std::mutex client_mutex;
 	mutable std::mutex response_state_mutex;
@@ -78,7 +86,8 @@ private:
 
 	void _thread_func();
 
-	Error _parse_url(const String &p_url);
+	static ParsedUrl _parse_url(const String &p_url);
+	void _apply_parsed_url(const ParsedUrl &p_parsed);
 	Error _request();
 	bool _update_connection();
 	bool _handle_response(bool *ret_value);
