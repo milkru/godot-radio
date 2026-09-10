@@ -32,6 +32,7 @@ void IcyHttpStream::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cancel_request"), &IcyHttpStream::cancel_request);
 	ClassDB::bind_method(D_METHOD("is_requesting"), &IcyHttpStream::is_requesting);
 	ClassDB::bind_method(D_METHOD("get_content_mime_type"), &IcyHttpStream::get_content_mime_type);
+	ClassDB::bind_method(D_METHOD("get_response_code"), &IcyHttpStream::get_response_code);
 	ClassDB::bind_method(D_METHOD("get_response_headers"), &IcyHttpStream::get_response_headers);
 	ClassDB::bind_method(D_METHOD("get_response_headers_as_dictionary"), &IcyHttpStream::get_response_headers_as_dictionary);
 	ClassDB::bind_method(D_METHOD("get_downloaded_bytes"), &IcyHttpStream::get_downloaded_bytes);
@@ -50,6 +51,7 @@ void IcyHttpStream::_bind_methods() {
     BIND_ENUM_CONSTANT(RESULT_REDIRECT_LIMIT_REACHED);
     BIND_ENUM_CONSTANT(RESULT_DISCONNECTED);
     BIND_ENUM_CONSTANT(RESULT_CANCELLED);
+    BIND_ENUM_CONSTANT(RESULT_REDIRECT_FAILED);
 }
 
 IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
@@ -121,6 +123,17 @@ Error IcyHttpStream::_request() {
 	return client->connect_to_host(url, port, use_tls ? tls_options : nullptr);
 }
 
+void IcyHttpStream::_reset_icy_state() {
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		icy_metaint = 0;
+	}
+	audio_bytes_until_meta = 0;
+	meta_bytes_remaining = 0;
+	meta_state = MetaState::AUDIO;
+	metadata_buffer.clear();
+}
+
 Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
 	if (requesting.is_set()) { return ERR_BUSY; }
 
@@ -155,14 +168,7 @@ Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse
 	}
 	request_headers.append_array(p_custom_headers);
 
-	{
-		std::lock_guard<std::mutex> lock(response_state_mutex);
-		icy_metaint = 0;
-	}
-	audio_bytes_until_meta = 0;
-	meta_bytes_remaining = 0;
-	meta_state = MetaState::AUDIO;
-	metadata_buffer.clear();
+	_reset_icy_state();
 
 	requesting.set();
 	thread_done.clear();
@@ -206,6 +212,11 @@ bool IcyHttpStream::is_requesting() const {
 String IcyHttpStream::get_content_mime_type() const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return content_type;
+}
+
+int IcyHttpStream::get_response_code() const {
+	std::lock_guard<std::mutex> lock(response_state_mutex);
+	return response_code;
 }
 
 void IcyHttpStream::set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder) {
@@ -356,45 +367,18 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		response_code = new_response_code;
 	}
 
-	if (new_response_code == 301 || new_response_code == 302) {
-		if (max_redirections >= 0 && redirections >= max_redirections) {
-			_defer_done(RESULT_REDIRECT_LIMIT_REACHED);
-			*ret_value = true;
-			return true;
-		}
+	const bool is_redirect = new_response_code == 301 || new_response_code == 302 || new_response_code == 303
+			|| new_response_code == 307 || new_response_code == 308;
+	if (is_redirect) {
+		// either the follow-up request is in flight (keep looping) or a terminal result was emitted (exit)
+		*ret_value = !_follow_redirect(new_headers);
+		return true;
+	}
 
-		String new_request;
-		for (int i = 0; i < new_headers.size(); ++i) {
-			if (new_headers[i].to_lower().begins_with("location: ")) {
-				new_request = new_headers[i].substr(10).strip_edges();
-			}
-		}
-
-		if (!new_request.is_empty()) {
-			client->close();
-			int updated_redirs = redirections + 1;
-			if (new_request.begins_with("http")) {
-				ParsedUrl parsed = _parse_url(new_request);
-				if (parsed.error == OK) {
-					_apply_parsed_url(parsed);
-				}
-			} else {
-				request_string = new_request;
-			}
-
-			Error err = _request();
-			if (err == OK) {
-				got_response.clear();
-				{
-					std::lock_guard<std::mutex> lock(response_state_mutex);
-					response_code = 0;
-				}
-				downloaded.set(0);
-				redirections = updated_redirs;
-				*ret_value = false;
-				return true;
-			}
-		}
+	if (new_response_code < 200 || new_response_code >= 300) {
+		_defer_done(RESULT_REQUEST_FAILED);
+		*ret_value = true;
+		return true;
 	}
 
 	bool found_content_type = false;
@@ -427,6 +411,57 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 	_defer_connected();
 
 	return false;
+}
+
+// returns true if a follow-up request was started, false if a terminal result was emitted.
+bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
+	if (max_redirections >= 0 && redirections >= max_redirections) {
+		_defer_done(RESULT_REDIRECT_LIMIT_REACHED);
+		return false;
+	}
+
+	const String location_prefix = "location: ";
+	String new_request;
+	for (int i = 0; i < p_headers.size(); ++i) {
+		if (p_headers[i].to_lower().begins_with(location_prefix)) {
+			new_request = p_headers[i].substr(location_prefix.length()).strip_edges();
+		}
+	}
+
+	if (new_request.is_empty()) {
+		_defer_done(RESULT_REDIRECT_FAILED);
+		return false;
+	}
+
+	if (new_request.begins_with("http")) {
+		ParsedUrl parsed = _parse_url(new_request);
+		if (parsed.error != OK) {
+			_defer_done(RESULT_REDIRECT_FAILED);
+			return false;
+		}
+		_apply_parsed_url(parsed);
+	} else {
+		request_string = new_request;
+	}
+
+	client->close();
+	Error err = _request();
+	if (err != OK) {
+		_defer_done(RESULT_REDIRECT_FAILED);
+		return false;
+	}
+
+	got_response.clear();
+	{
+		std::lock_guard<std::mutex> lock(response_state_mutex);
+		response_code = 0;
+		content_type = "";
+	}
+	downloaded.set(0);
+	++redirections;
+	_reset_icy_state();
+
+	return true;
 }
 
 void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {

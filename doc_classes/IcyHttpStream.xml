@@ -86,6 +86,15 @@
 			</description>
 		</method>
 
+		<method name="get_response_code">
+			<return type="int" />
+
+			<description>
+				Returns the HTTP status code of the last response, or [code]0[/code] if no response has been received yet.
+				Useful for telling apart failures reported as [constant RESULT_REQUEST_FAILED] (e.g. [code]404[/code], [code]403[/code], [code]503[/code]).
+			</description>
+		</method>
+
 		<method name="get_response_headers">
 			<return type="PackedStringArray" />
 
@@ -120,4 +129,37 @@
 			</description>
 		</method>
 	</methods>
+
+	<constants>
+		<constant name="RESULT_STREAM_FINISHED" value="0" enum="Result">
+			The server ended the stream normally.
+		</constant>
+		<constant name="RESULT_CANT_CONNECT" value="1" enum="Result">
+			A TCP connection to the host could not be established.
+		</constant>
+		<constant name="RESULT_CANT_RESOLVE" value="2" enum="Result">
+			The host name could not be resolved.
+		</constant>
+		<constant name="RESULT_CONNECTION_ERROR" value="3" enum="Result">
+			The connection failed while sending the request or during the TLS handshake.
+		</constant>
+		<constant name="RESULT_TIMEOUT" value="4" enum="Result">
+			No data was received within the timeout passed to [method request].
+		</constant>
+		<constant name="RESULT_REQUEST_FAILED" value="5" enum="Result">
+			The server returned no response or a non-2xx status code. Use [method get_response_code] to inspect the status.
+		</constant>
+		<constant name="RESULT_REDIRECT_LIMIT_REACHED" value="6" enum="Result">
+			The server redirected more times than allowed.
+		</constant>
+		<constant name="RESULT_DISCONNECTED" value="7" enum="Result">
+			The connection was dropped by the server.
+		</constant>
+		<constant name="RESULT_CANCELLED" value="8" enum="Result">
+			The request was cancelled with [method cancel_request].
+		</constant>
+		<constant name="RESULT_REDIRECT_FAILED" value="9" enum="Result">
+			A redirect response was received but could not be followed: the [code]Location[/code] header was missing or malformed, or the connection to the redirect target failed.
+		</constant>
+	</constants>
 </class>

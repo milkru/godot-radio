@@ -23,7 +23,8 @@ public:
         RESULT_REQUEST_FAILED,
         RESULT_REDIRECT_LIMIT_REACHED,
         RESULT_DISCONNECTED,
-        RESULT_CANCELLED
+        RESULT_CANCELLED,
+        RESULT_REDIRECT_FAILED
 	};
 
 private:
@@ -89,8 +90,10 @@ private:
 	static ParsedUrl _parse_url(const String &p_url);
 	void _apply_parsed_url(const ParsedUrl &p_parsed);
 	Error _request();
+	void _reset_icy_state();
 	bool _update_connection();
 	bool _handle_response(bool *ret_value);
+	bool _follow_redirect(const PackedStringArray &p_headers);
 	void _process_chunk(const PackedByteArray &p_chunk);
 
 protected:
@@ -104,6 +107,7 @@ public:
 	void cancel_request();
 	bool is_requesting() const;
 	String get_content_mime_type() const;
+	int get_response_code() const;
 	void set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder);
 	PackedStringArray get_response_headers() const;
 	Dictionary get_response_headers_as_dictionary() const;
