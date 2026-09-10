@@ -1,6 +1,5 @@
 #pragma once
 
-#include "godot_cpp/classes/audio_stream_generator.hpp"
 #include "godot_cpp/classes/audio_stream_generator_playback.hpp"
 #include "godot_cpp/classes/ref_counted.hpp"
 #include "godot_cpp/templates/hash_map.hpp"
@@ -18,10 +17,9 @@ public:
 
 private:
 	int target_buffer_frames = 11025;
-	int max_capacity_buffer_frames = 44100;
+	int max_capacity_buffer_frames = 0;
 	real_t buffering_progress = 0.0f;
 	bool is_buffering = true;
-	bool max_capacity_from_generator = false;
 
 	// mutex only guards against two native modules registering concurrently during engine init, not against script access.
 	static HashMap<String, DecoderFactory>& get_decoder_registry();
@@ -34,8 +32,8 @@ protected:
 	static void _bind_methods();
 
 public:
-	void set_buffer_thresholds(int p_target_frames, int p_max_capacity_frames = -1);
-	void set_playback(const Ref<AudioStreamGeneratorPlayback> p_playback, const Ref<AudioStreamGenerator> p_generator = Ref<AudioStreamGenerator>());
+	void set_buffer_thresholds(int p_target_frames);
+	void set_playback(const Ref<AudioStreamGeneratorPlayback> p_playback);
 	real_t get_buffering_progress() const;
 	bool get_is_buffering() const;
 	int get_current_target_frames() const;

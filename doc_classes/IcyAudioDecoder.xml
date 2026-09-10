@@ -37,21 +37,18 @@
 		<method name="set_playback">
 			<return type="void" />
 			<param index="0" name="playback" type="AudioStreamGeneratorPlayback" />
-			<param index="1" name="generator" type="AudioStreamGenerator" default="null" />
 			<description>
 				Sets the [AudioStreamGeneratorPlayback] instance used by the decoder for buffer management. This playback object is used to determine the current buffering state and available audio frames.
-				If [code]generator[/code] is also given, the maximum buffer capacity (in frames) is derived directly from it as [code]generator.mix_rate * generator.buffer_length[/code], so callers no longer need to compute and pass that value themselves via [method set_buffer_thresholds]. Pass [code]generator[/code] again (e.g. after changing its [code]mix_rate[/code]) to refresh the derived capacity.
+				The maximum buffer capacity is observed directly from the playback's ring buffer rather than computed, so no generator or capacity value needs to be supplied. Call this again with a freshly instantiated playback whenever the generator's [code]mix_rate[/code] or [code]buffer_length[/code] changes.
 			</description>
 		</method>
 
 		<method name="set_buffer_thresholds">
 			<return type="void" />
 			<param index="0" name="target_frames" type="int" />
-			<param index="1" name="max_capacity_frames" type="int" default="-1" />
 			<description>
-				Configures the buffering thresholds used by the decoder.
+				Configures the buffering threshold used by the decoder.
 				[code]target_frames[/code] specifies the number of buffered frames required before buffering is considered complete.
-				[code]max_capacity_frames[/code] specifies the maximum expected buffer capacity; it is normally unnecessary because [method set_playback] can derive it directly from an [AudioStreamGenerator]. Leave it at its default ([code]-1[/code]) to keep whatever capacity is already known. If a capacity was already derived via [method set_playback] and a different value is passed here, it is ignored (with a warning) in favor of the generator-derived value.
 			</description>
 		</method>
 
@@ -87,7 +84,7 @@
 		<method name="get_current_max_capacity_frames" qualifiers="const">
 			<return type="int" />
 			<description>
-				Returns the configured maximum buffer capacity, expressed in audio frames.
+				Returns the observed maximum capacity of the playback ring buffer, expressed in audio frames. Intended for debugging.
 			</description>
 		</method>
 

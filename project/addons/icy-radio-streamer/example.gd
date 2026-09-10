@@ -41,9 +41,9 @@ func _ready() -> void:
 				print("Mix rate: %d Hz" % rate)
 				stream.mix_rate = rate
 
-				# re-attach the playback now that the generator's final mix_rate is known,
-				# so the decoder derives max buffer capacity from the generator itself
-				icy_audio_decoder.set_playback(radio_player.get_stream_playback(), stream)
+				# re-attach the playback now that the generator's final mix_rate is known;
+				# the decoder observes the ring capacity from the playback itself
+				icy_audio_decoder.set_playback(radio_player.get_stream_playback())
 
 				var frames := int(stream.mix_rate / 2)
 				icy_audio_decoder.set_buffer_thresholds(frames)
