@@ -22,6 +22,13 @@
 				Emitted when the decoder has read enough of the MP3 stream to determine its sample rate and channel count.
 			</description>
 		</signal>
+
+		<signal name="buffer_overrun">
+			<param index="0" name="dropped_bytes" type="int" />
+			<description>
+				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (512 KiB) overflows. The oldest [code]dropped_bytes[/code] bytes are discarded so playback stays near the live edge. Usually means [method IcyAudioDecoder.process_audio] is not being called regularly.
+			</description>
+		</signal>
 	</signals>
 
 	<methods>

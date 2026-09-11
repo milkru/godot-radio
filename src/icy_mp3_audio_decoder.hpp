@@ -3,7 +3,6 @@
 #include "godot_cpp/variant/packed_byte_array.hpp"
 #include "icy_audio_decoder.hpp"
 #include "thirdparty/dr_mp3.h"
-#include <deque>
 #include <vector>
 #include <mutex>
 
@@ -13,14 +12,15 @@ class IcyMp3AudioDecoder : public IcyAudioDecoder {
 	GDCLASS(IcyMp3AudioDecoder, IcyAudioDecoder);
 
 private:
-	drmp3 mp3;
-	std::mutex buffer_mutex;
-	std::deque<PackedByteArray> chunks;
-	std::vector<float> pcm_buffer;
+	static constexpr size_t RING_CAPACITY = 1 << 19; // 512 KiB ~= 32s at 128kbps, ~= 13s at 320kbps
 
-	size_t byte_threshold = 16384; // 1s at 128kbps - lowest possible value, which is also dr_mp3's DRMP3_MIN_DATA_CHUNK_SIZE
-	size_t current_chunk_offset = 0;
+	drmp3 mp3;
+	std::vector<float> pcm_buffer;
+	std::mutex buffer_mutex;
+	uint8_t ring_buffer[RING_CAPACITY];
+	size_t ring_read_pos = 0;
 	size_t total_buffered_bytes = 0;
+	size_t byte_threshold = 16384; // 1s at 128kbps - lowest possible value, which is also dr_mp3's DRMP3_MIN_DATA_CHUNK_SIZE
 
 	int stream_sample_rate = 0;
 	int stream_channels = 0;
