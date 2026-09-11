@@ -277,76 +277,79 @@ void IcyHttpStream::_thread_func() {
 }
 
 bool IcyHttpStream::_update_connection() {
-	std::lock_guard<std::mutex> lock(client_mutex);
-	HTTPClient::Status current_status = client->get_status();
+	PackedByteArray chunk;
+	{
+		std::lock_guard<std::mutex> lock(client_mutex);
+		HTTPClient::Status current_status = client->get_status();
 
-	switch(current_status) {
-		case HTTPClient::STATUS_DISCONNECTED: {
-			_defer_done(RESULT_DISCONNECTED);
-			return true;
-		}
-		case HTTPClient::STATUS_RESOLVING:
-		case HTTPClient::STATUS_CONNECTING:
-		case HTTPClient::STATUS_REQUESTING: {
-			client->poll();
-			return false;
-		}
-		case HTTPClient::STATUS_CANT_RESOLVE: {
-			_defer_done(RESULT_CANT_RESOLVE);
-			return true;
-		}
-		case HTTPClient::STATUS_CANT_CONNECT: {
-			_defer_done(RESULT_CANT_CONNECT);
-			return true;
-		}
-		case HTTPClient::STATUS_CONNECTED: {
-			if (got_response.is_set()) {
-				// reached end of chunked transfer or standard stream (unlikely for icecast unless it disconnects)
-				_defer_done(RESULT_STREAM_FINISHED);
+		switch(current_status) {
+			case HTTPClient::STATUS_DISCONNECTED: {
+				_defer_done(RESULT_DISCONNECTED);
 				return true;
 			}
+			case HTTPClient::STATUS_RESOLVING:
+			case HTTPClient::STATUS_CONNECTING:
+			case HTTPClient::STATUS_REQUESTING: {
+				client->poll();
+				return false;
+			}
+			case HTTPClient::STATUS_CANT_RESOLVE: {
+				_defer_done(RESULT_CANT_RESOLVE);
+				return true;
+			}
+			case HTTPClient::STATUS_CANT_CONNECT: {
+				_defer_done(RESULT_CANT_CONNECT);
+				return true;
+			}
+			case HTTPClient::STATUS_CONNECTED: {
+				if (got_response.is_set()) {
+					// reached end of chunked transfer or standard stream (unlikely for icecast unless it disconnects)
+					_defer_done(RESULT_STREAM_FINISHED);
+					return true;
+				}
 
-			Error err = client->request(HTTPClient::METHOD_GET, request_string, request_headers);
-			if (err != OK) {
+				Error err = client->request(HTTPClient::METHOD_GET, request_string, request_headers);
+				if (err != OK) {
+					_defer_done(RESULT_CONNECTION_ERROR);
+					return true;
+				}
+
+				got_response.set();
+				return false;
+			}
+			case HTTPClient::STATUS_BODY: {
+				bool response_pending;
+				{
+					std::lock_guard<std::mutex> lock(response_state_mutex);
+					response_pending = response_code == 0;
+				}
+				if (got_response.is_set() && response_pending) {
+					bool ret_value;
+					if (_handle_response(&ret_value)) {
+						return ret_value;
+					}
+				}
+
+				client->poll();
+				if (client->get_status() != HTTPClient::STATUS_BODY) {
+					return false;
+				}
+
+				chunk = client->read_response_body_chunk();
+				break;
+			}
+			case HTTPClient::STATUS_CONNECTION_ERROR:
+			case HTTPClient::STATUS_TLS_HANDSHAKE_ERROR: {
 				_defer_done(RESULT_CONNECTION_ERROR);
 				return true;
 			}
-
-			got_response.set();
-			return false;
 		}
-		case HTTPClient::STATUS_BODY: {
-			bool response_pending;
-			{
-				std::lock_guard<std::mutex> lock(response_state_mutex);
-				response_pending = response_code == 0;
-			}
-			if (got_response.is_set() && response_pending) {
-				bool ret_value;
-				if (_handle_response(&ret_value)) {
-					return ret_value;
-				}
-			}
+	}
 
-			client->poll();
-			if (client->get_status() != HTTPClient::STATUS_BODY) {
-				return false;
-			}
-
-			PackedByteArray chunk = client->read_response_body_chunk();
-			if (chunk.size() > 0) {
-				downloaded.add(chunk.size());
-				timeout_start_msec = Time::get_singleton()->get_ticks_msec();
-				_process_chunk(chunk);
-			}
-
-			return false;
-		}
-		case HTTPClient::STATUS_CONNECTION_ERROR:
-		case HTTPClient::STATUS_TLS_HANDSHAKE_ERROR: {
-			_defer_done(RESULT_CONNECTION_ERROR);
-			return true;
-		}
+	if (chunk.size() > 0) {
+		downloaded.add(chunk.size());
+		timeout_start_msec = Time::get_singleton()->get_ticks_msec();
+		_process_chunk(chunk);
 	}
 
 	return false;
