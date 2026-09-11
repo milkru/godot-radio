@@ -5,8 +5,11 @@
 #include "godot_cpp/classes/tls_options.hpp"
 #include "godot_cpp/classes/thread.hpp"
 #include "godot_cpp/core/binder_common.hpp"
+#include "godot_cpp/templates/safe_refcount.hpp"
+#include "godot_cpp/variant/dictionary.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
 #include "icy_audio_decoder.hpp"
+#include <mutex>
 
 namespace godot {
 
@@ -51,34 +54,35 @@ private:
 	Ref<Thread> thread;
 	Ref<IcyAudioDecoder> audio_decoder;
 
-	String request_string;
-	String url;
-	String content_type;
-	PackedStringArray request_headers;
 	PackedStringArray response_headers;
-	PackedByteArray metadata_buffer;
-
-	uint64_t timeout_msec = 0;
-	uint64_t timeout_start_msec = 0;
-
-	SafeNumeric<int> downloaded;
-	int redirections = 0;
-	int max_redirections = 8;
-	int port = 0;
+	String content_type;
 	int response_code = 0;
 
-	int icy_metaint = 0;
-	int audio_bytes_until_meta = 0;
-	int meta_bytes_remaining = 0;
-	MetaState meta_state = AUDIO;
-
+	SafeNumeric<int> downloaded;
 	SafeFlag thread_done;
 	SafeFlag thread_request_quit;
 	SafeFlag result_emitted;
 	SafeFlag requesting;
 	SafeFlag got_response;
+
+	String request_string;
+	String url;
+	PackedStringArray request_headers;
+	PackedByteArray metadata_buffer;
+
+	uint64_t timeout_msec = 0;
+	uint64_t timeout_start_msec = 0;
+
+	int redirections = 0;
+	int max_redirections = 8;
+	int port = 0;
 	bool use_tls = false;
 	bool parse_icy_metadata = false;
+
+	int icy_metaint = 0;
+	int audio_bytes_until_meta = 0;
+	int meta_bytes_remaining = 0;
+	MetaState meta_state = AUDIO;
 
 	void _defer_connected();
 	void _defer_done(int p_status);

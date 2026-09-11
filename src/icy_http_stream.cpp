@@ -124,10 +124,7 @@ Error IcyHttpStream::_request() {
 }
 
 void IcyHttpStream::_reset_icy_state() {
-	{
-		std::lock_guard<std::mutex> lock(response_state_mutex);
-		icy_metaint = 0;
-	}
+	icy_metaint = 0;
 	audio_bytes_until_meta = 0;
 	meta_bytes_remaining = 0;
 	meta_state = MetaState::AUDIO;
@@ -401,7 +398,6 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		else if (!found_icy_metaint && lower_header.begins_with("icy-metaint:")) {
 			PackedStringArray parts = new_headers[i].split(":", false, 1);
 			if (parts.size() > 1) {
-				std::lock_guard<std::mutex> lock(response_state_mutex);
 				icy_metaint = parts[1].to_int();
 				audio_bytes_until_meta = icy_metaint;
 			}

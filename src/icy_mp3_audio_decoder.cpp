@@ -13,7 +13,6 @@ using namespace godot;
 
 IcyMp3AudioDecoder::IcyMp3AudioDecoder() {
 	is_initialized = false;
-	pcm_buffer.reserve(2048 * 2);
 }
 
 IcyMp3AudioDecoder::~IcyMp3AudioDecoder() {
@@ -139,9 +138,9 @@ void IcyMp3AudioDecoder::process_audio() {
 
 	while (true) {
 		int frames_needed = playback->get_frames_available();
-		if (frames_needed < 1024) { break; }
+		if (frames_needed < MIN_FRAMES_TO_DECODE) { break; }
 
-		int batch_frames = MIN(frames_needed, 2048);
+		int batch_frames = MIN(frames_needed, MAX_BATCH_FRAMES);
 
 		// jitter buffer - do not wake drmp3 until suitable amount of data present to prevent audio hitches
 		{
@@ -153,15 +152,14 @@ void IcyMp3AudioDecoder::process_audio() {
 			mp3.atEnd = 0;
 		}
 
-		pcm_buffer.resize(batch_frames * mp3.channels);
-		drmp3_uint64 frames_mixed = drmp3_read_pcm_frames_f32(&mp3, batch_frames, pcm_buffer.data());
+		drmp3_uint64 frames_mixed = drmp3_read_pcm_frames_f32(&mp3, batch_frames, pcm_buffer);
 
 		if (frames_mixed == 0) { break; }
 
-		PackedVector2Array godot_frames;
+		// CowData keeps the allocation when shrinking or staying the same size, so this only allocates on growth
 		godot_frames.resize(frames_mixed);
 		Vector2* out_ptr = godot_frames.ptrw();
-		float* in_ptr = pcm_buffer.data();
+		const float* in_ptr = pcm_buffer;
 
 		if (mp3.channels == 2) {
 			for (drmp3_uint64 i = 0; i < frames_mixed; ++i) {

@@ -4,8 +4,6 @@
 #include "godot_cpp/classes/ref_counted.hpp"
 #include "godot_cpp/templates/hash_map.hpp"
 #include "godot_cpp/variant/packed_byte_array.hpp"
-#include <functional>
-#include <mutex>
 
 namespace godot {
 
@@ -13,7 +11,7 @@ class IcyAudioDecoder: public RefCounted {
 	GDCLASS(IcyAudioDecoder, RefCounted);
 
 public:
-	using DecoderFactory = std::function<Ref<IcyAudioDecoder>()>;
+	using DecoderFactory = Ref<IcyAudioDecoder> (*)();
 
 private:
 	int target_buffer_frames = 11025;
@@ -21,9 +19,8 @@ private:
 	real_t buffering_progress = 0.0f;
 	bool is_buffering = true;
 
-	// mutex only guards against two native modules registering concurrently during engine init, not against script access.
+	// registration must happen during module initialisation (single-threaded); the registry is read-only afterwards.
 	static HashMap<String, DecoderFactory>& get_decoder_registry();
-	static std::mutex decoder_registry_mutex;
 
 protected:
 	Ref<AudioStreamGeneratorPlayback> playback;
@@ -39,7 +36,7 @@ public:
 	int get_current_target_frames() const;
 	int get_current_max_capacity_frames() const;
 
-	static void register_decoder(const String &p_mime_type, const DecoderFactory &p_factory);
+	static void register_decoder(const String &p_mime_type, DecoderFactory p_factory);
 	static Ref<IcyAudioDecoder> create_for_mime_type(const String &p_mime_type);
 
 	virtual void push_encoded_data(const PackedByteArray& p_data) = 0;

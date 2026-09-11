@@ -1,9 +1,9 @@
 #pragma once
 
 #include "godot_cpp/variant/packed_byte_array.hpp"
+#include "godot_cpp/variant/packed_vector2_array.hpp"
 #include "icy_audio_decoder.hpp"
 #include "thirdparty/dr_mp3.h"
-#include <vector>
 #include <mutex>
 
 namespace godot {
@@ -13,9 +13,13 @@ class IcyMp3AudioDecoder : public IcyAudioDecoder {
 
 private:
 	static constexpr size_t RING_CAPACITY = 1 << 19; // 512 KiB ~= 32s at 128kbps, ~= 13s at 320kbps
+	static constexpr int MIN_FRAMES_TO_DECODE = 1024;
+	static constexpr int MAX_BATCH_FRAMES = 2048;
+	static constexpr int MAX_CHANNELS = 2;
 
 	drmp3 mp3;
-	std::vector<float> pcm_buffer;
+	float pcm_buffer[MAX_BATCH_FRAMES * MAX_CHANNELS];
+	PackedVector2Array godot_frames;
 	std::mutex buffer_mutex;
 	uint8_t ring_buffer[RING_CAPACITY];
 	size_t ring_read_pos = 0;
