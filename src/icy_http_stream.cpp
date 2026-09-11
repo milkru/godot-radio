@@ -240,7 +240,7 @@ Dictionary IcyHttpStream::get_response_headers_as_dictionary() const {
 	for (int i = 0; i < response_headers.size(); ++i) {
 		int sp = response_headers[i].find(":");
 		if (sp == -1) { continue; }
-		String key = response_headers[i].substr(0, sp).strip_edges();
+		String key = response_headers[i].substr(0, sp).strip_edges().to_lower();
 		String value = response_headers[i].substr(sp + 1).strip_edges();
 		dict[key] = value;
 	}

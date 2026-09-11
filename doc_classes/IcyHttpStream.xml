@@ -107,7 +107,7 @@
 			<return type="Dictionary" />
 
 			<description>
-				Returns the HTTP response headers as a key-value [Dictionary].
+				Returns the HTTP response headers as a key-value [Dictionary]. Header names are case-insensitive, so keys are lower-cased (e.g. [code]"icy-br"[/code], [code]"content-type"[/code]).
 			</description>
 		</method>
 

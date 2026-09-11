@@ -26,9 +26,15 @@ HashMap<String, IcyAudioDecoder::DecoderFactory>& IcyAudioDecoder::get_decoder_r
 	return registry;
 }
 
+static String normalize_mime_type(const String &p_mime_type) {
+	const int param_idx = p_mime_type.find(";");
+	const String base = param_idx == -1 ? p_mime_type : p_mime_type.substr(0, param_idx);
+	return base.strip_edges().to_lower();
+}
+
 void IcyAudioDecoder::register_decoder(const String &p_mime_type, const DecoderFactory &p_factory) {
 	std::lock_guard<std::mutex> lock(decoder_registry_mutex);
-	get_decoder_registry()[p_mime_type] = p_factory;
+	get_decoder_registry()[normalize_mime_type(p_mime_type)] = p_factory;
 }
 
 Ref<IcyAudioDecoder> IcyAudioDecoder::create_for_mime_type(const String &p_mime_type) {
@@ -37,7 +43,7 @@ Ref<IcyAudioDecoder> IcyAudioDecoder::create_for_mime_type(const String &p_mime_
 	{
 		std::lock_guard<std::mutex> lock(decoder_registry_mutex);
 		HashMap<String, DecoderFactory>& registry = get_decoder_registry();
-		HashMap<String, DecoderFactory>::Iterator it = registry.find(p_mime_type);
+		HashMap<String, DecoderFactory>::Iterator it = registry.find(normalize_mime_type(p_mime_type));
 
 		if (it == registry.end()) {
 			return Ref<IcyAudioDecoder>();

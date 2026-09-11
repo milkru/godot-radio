@@ -21,6 +21,9 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level)
 	GDREGISTER_CLASS(IcyHttpStream);
 
 	IcyAudioDecoder::register_decoder("audio/mpeg", &IcyMp3AudioDecoder::create_instance);
+	IcyAudioDecoder::register_decoder("audio/mp3", &IcyMp3AudioDecoder::create_instance);
+	IcyAudioDecoder::register_decoder("audio/x-mpeg", &IcyMp3AudioDecoder::create_instance);
+	IcyAudioDecoder::register_decoder("audio/mpeg3", &IcyMp3AudioDecoder::create_instance);
 }
 
 void uninitialize_gdextension_types(ModuleInitializationLevel p_level) {
