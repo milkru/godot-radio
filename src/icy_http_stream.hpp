@@ -37,7 +37,8 @@ public:
 
 private:
 	static constexpr int ICY_METADATA_BLOCK_SIZE = 16;
-	static constexpr int POLL_INTERVAL_USEC = 1000;
+	static constexpr int POLL_INTERVAL_USEC = 10000;
+	static constexpr int READ_CHUNK_SIZE = 16384;
 	static constexpr int DEFAULT_HTTP_PORT = 80;
 	static constexpr int DEFAULT_HTTPS_PORT = 443;
 	static constexpr double MSEC_PER_SEC = 1000.0;

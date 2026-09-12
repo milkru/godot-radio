@@ -16,7 +16,6 @@ class IcyMp3AudioDecoder : public IcyAudioDecoder {
 
 private:
 	static constexpr size_t RING_CAPACITY = 1 << 19; // 512 KiB ~= 32s at 128kbps, ~= 13s at 320kbps
-	static constexpr int MIN_FRAMES_TO_DECODE = 1024;
 	static constexpr int MAX_BATCH_FRAMES = 2048;
 	static constexpr int MAX_CHANNELS = 2;
 	static constexpr size_t BITS_PER_KILOBIT = 1000;

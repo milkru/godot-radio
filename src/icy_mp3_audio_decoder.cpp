@@ -145,31 +145,25 @@ void IcyMp3AudioDecoder::process_audio() {
 	if (playback.is_null()) { return; }
 
 	while (true) {
-		int frames_needed = playback->get_frames_available();
-		if (frames_needed < MIN_FRAMES_TO_DECODE) { break; }
-
-		int batch_frames = MIN(frames_needed, MAX_BATCH_FRAMES);
+		if (playback->get_frames_available() < MAX_BATCH_FRAMES) { break; }
 
 		{
 			std::lock_guard<std::mutex> lock(buffer_mutex);
 			if (is_decode_gated) {
 				if (total_buffered_bytes < byte_threshold) { break; }
 				is_decode_gated = false;
-			} else if (total_buffered_bytes < DRMP3_MIN_DATA_CHUNK_SIZE) {
-				is_decode_gated = true;
-				break;
 			}
 		}
 
-		if (mp3.atEnd) {
-			mp3.atEnd = 0;
+		mp3.atEnd = 0;
+		drmp3_uint64 frames_mixed = drmp3_read_pcm_frames_f32(&mp3, MAX_BATCH_FRAMES, pcm_buffer);
+
+		if (frames_mixed < static_cast<drmp3_uint64>(MAX_BATCH_FRAMES)) {
+			// dr_mp3 ran dry (its own buffer and the ring) - rebuffer to byte_threshold before resuming
+			is_decode_gated = true;
+			if (frames_mixed == 0) { break; }
 		}
 
-		drmp3_uint64 frames_mixed = drmp3_read_pcm_frames_f32(&mp3, batch_frames, pcm_buffer);
-
-		if (frames_mixed == 0) { break; }
-
-		// CowData keeps the allocation when shrinking or staying the same size, so this only allocates on growth
 		godot_frames.resize(frames_mixed);
 		Vector2 *out_ptr = godot_frames.ptrw();
 		const float *in_ptr = pcm_buffer;
@@ -185,7 +179,5 @@ void IcyMp3AudioDecoder::process_audio() {
 		}
 
 		playback->push_buffer(godot_frames);
-
-		if (frames_mixed < static_cast<drmp3_uint64>(batch_frames)) { break; }
 	}
 }

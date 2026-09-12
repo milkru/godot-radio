@@ -16,6 +16,7 @@ using namespace godot;
 
 IcyHttpStream::IcyHttpStream() {
 	client.instantiate();
+	client->set_read_chunk_size(READ_CHUNK_SIZE);
 	tls_options = TLSOptions::client();
 	thread.instantiate();
 }
