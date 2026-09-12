@@ -130,6 +130,7 @@
 
 			<description>
 				Sets audio decoder to which downloaded data chunks will be forwarded. Data is pushed into the decoder directly from the download thread; it is not routed through the main thread.
+				[b]Note:[/b] Body bytes that arrive before a decoder is attached are discarded, so attach it from the [signal connection_opened] handler. Because that signal is delivered deferred while the download continues, the first chunk of the stream is best-effort: a raw MP3 stream resynchronises on the next frame, but a container format that needs its header pages would not.
 			</description>
 		</method>
 	</methods>

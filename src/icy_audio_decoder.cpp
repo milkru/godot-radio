@@ -27,6 +27,7 @@ void IcyAudioDecoder::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("buffering_finished"));
 	ADD_SIGNAL(MethodInfo("stream_info_ready"));
 	ADD_SIGNAL(MethodInfo("buffer_overrun", PropertyInfo(Variant::INT, "dropped_bytes")));
+	ADD_SIGNAL(MethodInfo("stream_error", PropertyInfo(Variant::STRING, "message")));
 }
 
 HashMap<String, IcyAudioDecoder::DecoderFactory> &IcyAudioDecoder::get_decoder_registry() {
@@ -181,13 +182,12 @@ void IcyAudioDecoder::reset() {
 	stream_channels = 0;
 	is_stream_info_known = false;
 	is_decode_gated = true;
+	probe_failures = 0;
 	is_buffering = true;
 	buffering_progress = 0.0f;
 }
 
 void IcyAudioDecoder::process_audio() {
-	update_buffering_state();
-
 	// stream info is probed before a playback is required, so the caller can size the generator
 	// (mix_rate) from stream_info_ready and only then hand over a correctly sized playback
 	if (!is_stream_info_known) {
@@ -196,10 +196,21 @@ void IcyAudioDecoder::process_audio() {
 			if (total_buffered_bytes < byte_threshold) { return; }
 		}
 
-		if (!_probe_stream()) { return; }
+		if (!_probe_stream()) {
+			// a failed probe has eaten byte_threshold bytes; on a mislabelled stream (AAC behind audio/mpeg
+			// is common on SHOUTcast v1) this would otherwise repeat silently forever
+			++probe_failures;
+			if (probe_failures == MAX_PROBE_FAILURES) {
+				const String message = "IcyAudioDecoder: could not detect the stream format after " + itos(probe_failures) + " attempts. Is the content type correct?";
+				ERR_PRINT(message);
+				emit_signal("stream_error", message);
+			}
+			return;
+		}
 		ERR_FAIL_COND_MSG(stream_channels < 1 || stream_channels > MAX_CHANNELS, "IcyAudioDecoder: unsupported channel count " + itos(stream_channels));
 
 		is_stream_info_known = true;
+		probe_failures = 0;
 		// main thread, emitted directly; a handler may call set_playback() here
 		emit_signal("stream_info_ready");
 	}
@@ -241,6 +252,10 @@ void IcyAudioDecoder::process_audio() {
 
 		playback->push_buffer(godot_frames);
 	}
+
+	// evaluated after the loop so the state describes the generator as this tick leaves it: an underrun
+	// that was refilled above reports buffering_finished now instead of one tick later
+	update_buffering_state();
 }
 
 void IcyAudioDecoder::update_buffering_state() {

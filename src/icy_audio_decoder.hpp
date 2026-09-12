@@ -21,8 +21,12 @@ public:
 	using DecoderFactory = Ref<IcyAudioDecoder> (*)();
 
 private:
-	static constexpr size_t RING_CAPACITY = 1 << 19; // 512 KiB ~= 32s at 128kbps, ~= 13s at 320kbps
+	// 128 KiB ~= 8s at 128kbps, ~= 3s at 320kbps. The gate never needs more than byte_threshold (<= 40 KiB at
+	// 320kbps) plus a margin for bursty delivery; anything larger only lets playback fall further behind live
+	// after a stall, because drop-oldest engages only when the ring is full
+	static constexpr size_t RING_CAPACITY = 1 << 17;
 	static constexpr size_t DEFAULT_BYTE_THRESHOLD = 16384; // ~1s at 128kbps
+	static constexpr int MAX_PROBE_FAILURES = 2;
 	static constexpr int MAX_BATCH_FRAMES = 2048;
 	static constexpr int MAX_CHANNELS = 2;
 	static constexpr size_t BITS_PER_KILOBIT = 1000;
@@ -41,6 +45,7 @@ private:
 	size_t min_byte_threshold = DEFAULT_BYTE_THRESHOLD;
 	bool is_stream_info_known = false;
 	bool is_decode_gated = true;
+	int probe_failures = 0;
 
 	int target_buffer_frames = 11025;
 	int max_capacity_buffer_frames = 0;

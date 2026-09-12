@@ -39,9 +39,15 @@ public:
 private:
 	static constexpr int POLL_INTERVAL_USEC = 10000;
 	static constexpr int READ_CHUNK_SIZE = 16384;
+	static constexpr int MAX_REDIRECTIONS = 8;
 	static constexpr int DEFAULT_HTTP_PORT = 80;
 	static constexpr int DEFAULT_HTTPS_PORT = 443;
 	static constexpr double MSEC_PER_SEC = 1000.0;
+
+	enum class PollStep {
+		KEEP_POLLING,
+		STOP
+	};
 
 	struct ParsedUrl {
 		String host;
@@ -66,7 +72,6 @@ private:
 	int response_code = 0;
 
 	SafeNumeric<int> downloaded;
-	SafeFlag thread_done;
 	SafeFlag thread_request_quit;
 	SafeFlag result_emitted;
 	SafeFlag requesting;
@@ -82,28 +87,31 @@ private:
 	uint64_t timeout_start_msec = 0;
 
 	int redirections = 0;
-	int max_redirections = 8;
 	int port = 0;
 	bool use_tls = false;
 	bool parse_icy_metadata = false;
 
 	// all of these run on the worker thread. Signals are routed through the message queue;
 	// audio data goes straight into the (thread-safe) decoder without deferring.
-	void emit_connected_deferred();
-	void finish_with_result(int p_status);
-	void forward_data_to_decoder(const uint8_t *p_data, int p_size);
-	void emit_metadata_deferred(const uint8_t *p_data, int p_size);
-
 	void _thread_func();
+	PollStep _update_connection();
+	void _process_chunk(const PackedByteArray &p_chunk);
+	void _forward_data_to_decoder(const uint8_t *p_data, int p_size);
+	void _emit_connected_deferred();
+	void _emit_metadata_deferred(const uint8_t *p_data, int p_size);
+	// also called from cancel_request() on the main thread, after the worker has been joined
+	void _finish_with_result(int p_status);
+
+	// caller must hold client_mutex
+	Error _connect_socket();
+	// caller must hold client_mutex; called only while response_code == 0
+	PollStep _handle_response();
+	// caller must hold client_mutex
+	PollStep _follow_redirect(const PackedStringArray &p_headers);
 
 	static ParsedUrl _parse_url(const String &p_url);
 	void _apply_parsed_url(const ParsedUrl &p_parsed);
-	Error _request();
 	void _reset_icy_state();
-	bool _update_connection();
-	bool _handle_response(bool *ret_value);
-	bool _follow_redirect(const PackedStringArray &p_headers);
-	void _process_chunk(const PackedByteArray &p_chunk);
 
 protected:
 	static void _bind_methods();
@@ -117,6 +125,9 @@ public:
 	bool is_requesting() const;
 	String get_content_mime_type() const;
 	int get_response_code() const;
+	// connection_opened is deferred while the worker keeps reading the body, so bytes that arrive before a
+	// decoder is attached are dropped. Attach it inside the connection_opened handler; the leading bytes are
+	// best-effort (a raw MP3 stream resyncs, a container needing its header pages would not)
 	void set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder);
 	PackedStringArray get_response_headers() const;
 	Dictionary get_response_headers_as_dictionary() const;

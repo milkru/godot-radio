@@ -10,7 +10,7 @@
 	</brief_description>
 
 	<description>
-		[IcyAudioDecoder] is the base class for audio stream decoders and owns the whole streaming pipeline: incoming encoded data is held in a fixed 512 KiB jitter buffer (when it overflows the oldest bytes are dropped and [signal buffer_overrun] is emitted), decoded in fixed-size batches from [method process_audio] and pushed into an [AudioStreamGeneratorPlayback]. It also provides the buffering mechanism, including configurable buffer thresholds, buffering state tracking, and notifications when buffering starts or finishes.
+		[IcyAudioDecoder] is the base class for audio stream decoders and owns the whole streaming pipeline: incoming encoded data is held in a fixed 128 KiB jitter buffer (about 8 seconds at 128 kbps; when it overflows the oldest bytes are dropped and [signal buffer_overrun] is emitted, which keeps playback near the live edge after a stall), decoded in fixed-size batches from [method process_audio] and pushed into an [AudioStreamGeneratorPlayback]. It also provides the buffering mechanism, including configurable buffer thresholds, buffering state tracking, and notifications when buffering starts or finishes.
 		Decoding does not start until roughly one second of encoded data has been buffered (see [method set_bitrate_hint]); the same amount is buffered again whenever the codec runs out of data.
 
 		[b]Note:[/b] Derived classes only implement the codec itself (probe, decode a batch, reset); everything else is shared.
@@ -41,7 +41,14 @@
 		<signal name="buffer_overrun">
 			<param index="0" name="dropped_bytes" type="int" />
 			<description>
-				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (512 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Usually means [method process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
+				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (128 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Usually means [method process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
+			</description>
+		</signal>
+
+		<signal name="stream_error">
+			<param index="0" name="message" type="String" />
+			<description>
+				Emitted from inside [method process_audio] (synchronously, on the main thread) when the decoder has failed to detect the stream format twice in a row. Each attempt consumes the buffered data, so this usually means the stream is not in the format the decoder was created for (for example AAC served with an [code]audio/mpeg[/code] content type). The decoder keeps trying; the handler should typically cancel the request. Emitted once per stream; [method reset] re-arms it.
 			</description>
 		</signal>
 	</signals>
@@ -76,7 +83,7 @@
 		<method name="reset">
 			<return type="void" />
 			<description>
-				Discards all buffered encoded data and the codec state, so the decoder probes the stream again from scratch. Use it to reuse one decoder instance across reconnects instead of creating a new one. Must be called from the main thread.
+				Discards all buffered encoded data, the codec state and the probe-failure count, so the decoder probes the stream again from scratch. Use it to reuse one decoder instance across reconnects instead of creating a new one. Must be called from the main thread.
 			</description>
 		</method>
 
