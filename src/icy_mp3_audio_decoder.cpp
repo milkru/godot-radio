@@ -142,10 +142,15 @@ void IcyMp3AudioDecoder::process_audio() {
 
 		int batch_frames = MIN(frames_needed, MAX_BATCH_FRAMES);
 
-		// jitter buffer - do not wake drmp3 until suitable amount of data present to prevent audio hitches
 		{
 			std::lock_guard<std::mutex> lock(buffer_mutex);
-			if (total_buffered_bytes < byte_threshold) { break; }
+			if (is_decode_gated) {
+				if (total_buffered_bytes < byte_threshold) { break; }
+				is_decode_gated = false;
+			} else if (total_buffered_bytes < DRMP3_MIN_DATA_CHUNK_SIZE) {
+				is_decode_gated = true;
+				break;
+			}
 		}
 
 		if (mp3.atEnd) {

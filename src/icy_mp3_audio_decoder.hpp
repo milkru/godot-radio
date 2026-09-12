@@ -30,6 +30,7 @@ private:
 	int stream_channels = 0;
 
 	bool is_initialized = false;
+	bool is_decode_gated = true;
 
 	static size_t on_read_callback(void* p_user_data, void* p_buffer_out, size_t bytes_to_read);
 	size_t read_data(void* p_buffer_out, size_t bytes_to_read);
