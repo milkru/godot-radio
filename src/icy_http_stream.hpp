@@ -13,6 +13,7 @@
 #include "godot_cpp/variant/packed_string_array.hpp"
 #include "godot_cpp/variant/string.hpp"
 #include "icy_audio_decoder.hpp"
+#include "icy_metadata_demuxer.hpp"
 #include <cstdint>
 #include <mutex>
 
@@ -36,18 +37,11 @@ public:
 	};
 
 private:
-	static constexpr int ICY_METADATA_BLOCK_SIZE = 16;
 	static constexpr int POLL_INTERVAL_USEC = 10000;
 	static constexpr int READ_CHUNK_SIZE = 16384;
 	static constexpr int DEFAULT_HTTP_PORT = 80;
 	static constexpr int DEFAULT_HTTPS_PORT = 443;
 	static constexpr double MSEC_PER_SEC = 1000.0;
-
-	enum MetaState {
-		AUDIO,
-		LENGTH_BYTE,
-		METADATA
-	};
 
 	struct ParsedUrl {
 		String host;
@@ -82,7 +76,7 @@ private:
 	String request_string;
 	String url;
 	PackedStringArray request_headers;
-	PackedByteArray metadata_buffer;
+	IcyMetadataDemuxer icy_demuxer;
 
 	uint64_t timeout_msec = 0;
 	uint64_t timeout_start_msec = 0;
@@ -93,17 +87,12 @@ private:
 	bool use_tls = false;
 	bool parse_icy_metadata = false;
 
-	int icy_metaint = 0;
-	int audio_bytes_until_meta = 0;
-	int meta_bytes_remaining = 0;
-	MetaState meta_state = AUDIO;
-
 	// all of these run on the worker thread. Signals are routed through the message queue;
 	// audio data goes straight into the (thread-safe) decoder without deferring.
 	void emit_connected_deferred();
 	void finish_with_result(int p_status);
-	void forward_data_to_decoder(const PackedByteArray &p_data);
-	void emit_metadata_deferred(const String &p_meta);
+	void forward_data_to_decoder(const uint8_t *p_data, int p_size);
+	void emit_metadata_deferred(const uint8_t *p_data, int p_size);
 
 	void _thread_func();
 

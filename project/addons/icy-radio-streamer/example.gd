@@ -11,7 +11,7 @@ func _ready() -> void:
 	# stream assigned to radio_player must be an AudioStreamGenerator
 	stream = radio_player.stream
 	icy_http = IcyHttpStream.new()
-	
+	 
 	#region open connection
 	icy_http.connection_opened.connect(func():
 		var response_headers_dict := icy_http.get_response_headers_as_dictionary()
@@ -33,7 +33,7 @@ func _ready() -> void:
 
 		# (optional) check for bitrate information.
 		# if it is unavailable the decoder assumes a standard 128 kbps MP3 stream
-		if response_headers_dict.has("icy-br") and icy_audio_decoder.has_method("set_bitrate_hint"):
+		if response_headers_dict.has("icy-br"):
 			var kbps = int(response_headers_dict["icy-br"])
 			icy_audio_decoder.set_bitrate_hint(kbps)
 			print("Bitrate: %d kbps" % kbps)

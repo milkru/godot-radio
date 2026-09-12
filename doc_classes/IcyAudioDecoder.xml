@@ -10,10 +10,10 @@
 	</brief_description>
 
 	<description>
-		[IcyAudioDecoder] is a generic audio decoder base class that provides a common interface for audio stream decoders.
-		It manages interaction with an [AudioStreamGeneratorPlayback] instance and provides a standardized buffering mechanism, including configurable buffer thresholds, buffering state tracking, and notifications when buffering starts or finishes.
+		[IcyAudioDecoder] is the base class for audio stream decoders and owns the whole streaming pipeline: incoming encoded data is held in a fixed 512 KiB jitter buffer (when it overflows the oldest bytes are dropped and [signal buffer_overrun] is emitted), decoded in fixed-size batches from [method process_audio] and pushed into an [AudioStreamGeneratorPlayback]. It also provides the buffering mechanism, including configurable buffer thresholds, buffering state tracking, and notifications when buffering starts or finishes.
+		Decoding does not start until roughly one second of encoded data has been buffered (see [method set_bitrate_hint]); the same amount is buffered again whenever the codec runs out of data.
 
-		[b]Note:[/b] Derived classes are expected to implement the actual decoding logic.
+		[b]Note:[/b] Derived classes only implement the codec itself (probe, decode a batch, reset); everything else is shared.
 	</description>
 
 	<tutorials>
@@ -29,6 +29,19 @@
 		<signal name="buffering_finished">
 			<description>
 				Emitted when the buffered audio data reaches the configured target threshold and buffering completes. Emitted synchronously from [method process_audio].
+			</description>
+		</signal>
+
+		<signal name="stream_info_ready">
+			<description>
+				Emitted from inside [method process_audio] (synchronously, on the main thread) once the decoder has read enough of the stream to determine its sample rate and channel count. This happens before a playback is required, so a handler can set the generator's [code]mix_rate[/code] from [method get_stream_sample_rate], start the player and then call [method set_playback] with the freshly created playback. No audio is decoded until a playback has been set.
+			</description>
+		</signal>
+
+		<signal name="buffer_overrun">
+			<param index="0" name="dropped_bytes" type="int" />
+			<description>
+				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (512 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Usually means [method process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
 			</description>
 		</signal>
 	</signals>
@@ -56,8 +69,36 @@
 			<return type="void" />
 			<description>
 				Processes decoder-specific audio handling and moves raw audio frame data into the [AudioStreamGeneratorPlayback]'s ring buffer. Call it regularly (e.g. from a [Timer] or [method Node._process]); the decoder sizes its work to the space available in the playback.
-				[b]Note:[/b] Must be called from the main thread. All signals raised from it ([signal buffering_started], [signal buffering_finished] and decoder-specific ones such as [signal IcyMp3AudioDecoder.stream_info_ready]) are emitted directly, not deferred, so their handlers run before this method returns.
-				[b]Note:[/b] This method is intended to be implemented by derived decoder classes.
+				[b]Note:[/b] Must be called from the main thread. All signals raised from it ([signal buffering_started], [signal buffering_finished] and [signal stream_info_ready]) are emitted directly, not deferred, so their handlers run before this method returns.
+			</description>
+		</method>
+
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Discards all buffered encoded data and the codec state, so the decoder probes the stream again from scratch. Use it to reuse one decoder instance across reconnects instead of creating a new one. Must be called from the main thread.
+			</description>
+		</method>
+
+		<method name="set_bitrate_hint">
+			<return type="void" />
+			<param index="0" name="kbps" type="int" />
+			<description>
+				Sets the amount of encoded data (in bytes) that must be buffered before decoding starts, and before it resumes after the codec has run out of data, to roughly one second of audio at [param kbps]. The threshold is [code]max((kbps * 1000) / 8, floor)[/code], where [code]floor[/code] is the minimum amount the codec needs to probe the stream (16384 bytes for MP3, so streams below 128 kbps all use the floor, which for them is more than one second of audio). If this method is not called, the floor is used. Non-positive values are ignored.
+			</description>
+		</method>
+
+		<method name="get_stream_sample_rate" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the sample rate of the incoming stream, or [code]0[/code] until [signal stream_info_ready] has been emitted.
+			</description>
+		</method>
+
+		<method name="get_stream_channels" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the channel count of the incoming stream, or [code]0[/code] until [signal stream_info_ready] has been emitted.
 			</description>
 		</method>
 

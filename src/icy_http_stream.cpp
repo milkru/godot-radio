@@ -5,7 +5,6 @@
 #include "godot_cpp/classes/time.hpp"
 #include "godot_cpp/classes/tls_options.hpp"
 #include "godot_cpp/core/class_db.hpp"
-#include "godot_cpp/core/math.hpp"
 #include "godot_cpp/variant/callable_method_pointer.hpp"
 #include "godot_cpp/variant/packed_byte_array.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
@@ -129,11 +128,7 @@ Error IcyHttpStream::_request() {
 }
 
 void IcyHttpStream::_reset_icy_state() {
-	icy_metaint = 0;
-	audio_bytes_until_meta = 0;
-	meta_bytes_remaining = 0;
-	meta_state = MetaState::AUDIO;
-	metadata_buffer.clear();
+	icy_demuxer.reset(0);
 }
 
 Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
@@ -403,8 +398,7 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		else if (!found_icy_metaint && lower_header.begins_with("icy-metaint:")) {
 			PackedStringArray parts = new_headers[i].split(":", false, 1);
 			if (parts.size() > 1) {
-				icy_metaint = parts[1].to_int();
-				audio_bytes_until_meta = icy_metaint;
+				icy_demuxer.reset(parts[1].to_int());
 			}
 			found_icy_metaint = true;
 		}
@@ -468,62 +462,11 @@ bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
 	return true;
 }
 
+// the demuxer hands out views into p_chunk; nothing is sliced or copied before reaching the ring
 void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
-	if (icy_metaint == 0 || !parse_icy_metadata) {
-		forward_data_to_decoder(p_chunk);
-		return;
-	}
-
-	int offset = 0;
-	int size = p_chunk.size();
-	const uint8_t *rptr = p_chunk.ptr();
-
-	while(offset < size) {
-		if (meta_state == MetaState::AUDIO) {
-			int bytes_to_read = MIN(audio_bytes_until_meta, size - offset);
-			if (bytes_to_read > 0) {
-				PackedByteArray audio_slice = p_chunk.slice(offset, offset + bytes_to_read);
-				forward_data_to_decoder(audio_slice);
-
-				offset += bytes_to_read;
-				audio_bytes_until_meta -= bytes_to_read;
-			}
-
-			if (audio_bytes_until_meta == 0) {
-				meta_state = MetaState::LENGTH_BYTE;
-			}
-		}
-		else if (meta_state == MetaState::LENGTH_BYTE) {
-			int meta_length_multiplier = rptr[offset];
-			meta_bytes_remaining = meta_length_multiplier * ICY_METADATA_BLOCK_SIZE;
-			++offset;
-
-			if (meta_bytes_remaining > 0) {
-				meta_state = MetaState::METADATA;
-				metadata_buffer.clear();
-			} else {
-				meta_state = MetaState::AUDIO;
-				audio_bytes_until_meta = icy_metaint;
-			}
-		}
-		else if (meta_state == MetaState::METADATA) {
-			int bytes_to_read = MIN(meta_bytes_remaining, size - offset);
-
-			metadata_buffer.append_array(p_chunk.slice(offset, offset + bytes_to_read));
-
-			offset += bytes_to_read;
-			meta_bytes_remaining -= bytes_to_read;
-
-			if (meta_bytes_remaining == 0) {
-				String meta_str;
-				meta_str.parse_utf8((const char*)metadata_buffer.ptr(), metadata_buffer.size());
-				emit_metadata_deferred(meta_str);
-
-				meta_state = MetaState::AUDIO;
-				audio_bytes_until_meta = icy_metaint;
-			}
-		}
-	}
+	icy_demuxer.feed(p_chunk.ptr(), p_chunk.size(),
+			[this](const uint8_t *p_data, int p_size) { forward_data_to_decoder(p_data, p_size); },
+			[this](const uint8_t *p_data, int p_size) { emit_metadata_deferred(p_data, p_size); });
 }
 
 void IcyHttpStream::emit_connected_deferred() {
@@ -538,18 +481,20 @@ void IcyHttpStream::finish_with_result(int p_status) {
 }
 
 // not deferred on purpose: the decoder is thread-safe and audio data must not wait a frame in the message queue
-void IcyHttpStream::forward_data_to_decoder(const PackedByteArray &p_data) {
+void IcyHttpStream::forward_data_to_decoder(const uint8_t *p_data, int p_size) {
 	std::lock_guard<std::mutex> lock(decoder_mutex);
 
 	if (audio_decoder.is_valid()) {
-		audio_decoder->push_encoded_data(p_data);
+		audio_decoder->push_encoded_data(p_data, static_cast<size_t>(p_size));
 	}
 }
 
-// string cleanup happens here on the worker thread, only the emit is deferred
-void IcyHttpStream::emit_metadata_deferred(const String &p_meta) {
+// string decoding and cleanup happen here on the worker thread, only the emit is deferred
+void IcyHttpStream::emit_metadata_deferred(const uint8_t *p_data, int p_size) {
+	String meta_str;
+	meta_str.parse_utf8(reinterpret_cast<const char *>(p_data), p_size);
 	// icecast pads metadata with null bytes, strip before emitting
-	String clean_meta = p_meta.strip_edges().replace(String::chr(0), "");
+	String clean_meta = meta_str.strip_edges().replace(String::chr(0), "");
 	if (!clean_meta.is_empty()) {
 		call_deferred("emit_signal", "metadata_received", clean_meta);
 	}
