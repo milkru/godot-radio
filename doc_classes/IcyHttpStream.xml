@@ -26,21 +26,24 @@
 		</signal>
 
 		<signal name="connection_closed">
+			<param index="0" name="result" type="int" enum="IcyHttpStream.Result" />
 			<description>
 				Emitted when the connection is closed, either intentionally or due to an error. [param result] contains a [enum Result] value describing the reason the connection was closed.
+				[b]Note:[/b] This can fire before [signal connection_opened] (e.g. [constant RESULT_CANT_CONNECT] or a non-2xx status), so handlers must not assume a decoder has been created yet.
 			</description>
 		</signal>
 
 		<signal name="metadata_received">
+			<param index="0" name="metadata" type="String" />
 			<description>
-				Emitted when ICY metadata is received from the server. The format and contents of [param metadata] depend on the metadata provided by the stream.
+				Emitted when ICY metadata is received from the server. The format and contents of [param metadata] depend on the metadata provided by the stream (typically [code]StreamTitle='Artist - Title';[/code]).
 			</description>
 		</signal>
 	</signals>
 
 	<methods>
 		<method name="request">
-			<return type="void" />
+			<return type="int" enum="Error" />
 
 			<param index="0" name="url" type="String" />
 			<param index="1" name="timeout" type="float" default="5.0" />
@@ -55,6 +58,7 @@
 			<description>
 				Sends an HTTP GET request to [param url] and attempts to establish a streaming connection.
 				If the connection succeeds, the stream begins downloading data continuously on a dedicated thread until the connection is closed or interrupted.
+				Returns [constant OK] if the request was started, [constant ERR_INVALID_PARAMETER] if [param url] is malformed (missing or unsupported scheme; only [code]http://[/code] and [code]https://[/code] are accepted), or [constant ERR_BUSY] if a request is already active. Connection failures that happen after this call returns are reported asynchronously through [signal connection_closed].
 				[param url] specifies the URL of the Icecast stream.
 				[param timeout] specifies the connection timeout in seconds.
 				If [param parse_metadata] is [code]true[/code], ICY metadata embedded in the stream is parsed and exposed through the appropriate signals.
@@ -66,19 +70,19 @@
 			<return type="void" />
 
 			<description>
-				Cancels the active request or stream, if one exists.
+				Cancels the active request or stream, if one exists. Blocks until the worker thread has stopped, then emits [signal connection_closed] with [constant RESULT_CANCELLED] (unless a result was already emitted).
 			</description>
 		</method>
 
-		<method name="is_requesting">
-			<return type="void" />
+		<method name="is_requesting" qualifiers="const">
+			<return type="bool" />
 
 			<description>
-				Returns [code]true[/code] if a request is currently active or data is being streamed.
+				Returns [code]true[/code] if a request is currently active or data is being streamed. Becomes [code]false[/code] again once the stream ends for any reason, so [method request] can be called again without an explicit [method cancel_request].
 			</description>
 		</method>
 
-		<method name="get_content_mime_type">
+		<method name="get_content_mime_type" qualifiers="const">
 			<return type="String" />
 
 			<description>
@@ -86,7 +90,7 @@
 			</description>
 		</method>
 
-		<method name="get_response_code">
+		<method name="get_response_code" qualifiers="const">
 			<return type="int" />
 
 			<description>
@@ -95,7 +99,7 @@
 			</description>
 		</method>
 
-		<method name="get_response_headers">
+		<method name="get_response_headers" qualifiers="const">
 			<return type="PackedStringArray" />
 
 			<description>
@@ -103,7 +107,7 @@
 			</description>
 		</method>
 
-		<method name="get_response_headers_as_dictionary">
+		<method name="get_response_headers_as_dictionary" qualifiers="const">
 			<return type="Dictionary" />
 
 			<description>
@@ -111,11 +115,11 @@
 			</description>
 		</method>
 
-		<method name="get_downloaded_bytes">
+		<method name="get_downloaded_bytes" qualifiers="const">
 			<return type="int" />
 
 			<description>
-				Returns the amount of bytes downloaded from the beginning of the stream.
+				Returns the amount of bytes downloaded from the beginning of the stream. The counter restarts from [code]0[/code] when a redirect is followed.
 			</description>
 		</method>
 
@@ -125,7 +129,7 @@
 			<param index="0" name="audio_decoder" type="IcyAudioDecoder" />
 
 			<description>
-				Sets audio decoder to which downloaded data chunks will be forwarded.
+				Sets audio decoder to which downloaded data chunks will be forwarded. Data is pushed into the decoder directly from the download thread; it is not routed through the main thread.
 			</description>
 		</method>
 	</methods>

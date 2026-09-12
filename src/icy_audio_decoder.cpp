@@ -1,6 +1,7 @@
 #include "icy_audio_decoder.hpp"
 #include "godot_cpp/classes/audio_stream_generator_playback.hpp"
 #include "godot_cpp/core/class_db.hpp"
+#include "godot_cpp/core/math.hpp"
 #include "godot_cpp/core/object.hpp"
 
 using namespace godot;
@@ -19,7 +20,7 @@ void IcyAudioDecoder::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("buffering_finished"));
 }
 
-HashMap<String, IcyAudioDecoder::DecoderFactory>& IcyAudioDecoder::get_decoder_registry() {
+HashMap<String, IcyAudioDecoder::DecoderFactory> &IcyAudioDecoder::get_decoder_registry() {
 	static HashMap<String, DecoderFactory> registry;
 	return registry;
 }
@@ -35,7 +36,7 @@ void IcyAudioDecoder::register_decoder(const String &p_mime_type, DecoderFactory
 }
 
 Ref<IcyAudioDecoder> IcyAudioDecoder::create_for_mime_type(const String &p_mime_type) {
-	HashMap<String, DecoderFactory>& registry = get_decoder_registry();
+	HashMap<String, DecoderFactory> &registry = get_decoder_registry();
 	HashMap<String, DecoderFactory>::Iterator it = registry.find(normalize_mime_type(p_mime_type));
 
 	if (it == registry.end()) {
@@ -91,13 +92,13 @@ void IcyAudioDecoder::update_buffering_state() {
 		if (buffered_frames >= target_buffer_frames) {
 			is_buffering = false;
 			buffering_progress = 1.0;
-			call_deferred("emit_signal", "buffering_finished");
+			emit_signal("buffering_finished");
 		}
 	} else {
 		if (buffered_frames <= 0) {
 			is_buffering = true;
 			buffering_progress = 0.0f;
-			call_deferred("emit_signal", "buffering_started");
+			emit_signal("buffering_started");
 		}
 	}
 }

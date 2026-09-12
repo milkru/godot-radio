@@ -1,14 +1,19 @@
 #pragma once
 
+#include "godot_cpp/classes/global_constants.hpp"
 #include "godot_cpp/classes/http_client.hpp"
 #include "godot_cpp/classes/ref_counted.hpp"
-#include "godot_cpp/classes/tls_options.hpp"
 #include "godot_cpp/classes/thread.hpp"
+#include "godot_cpp/classes/tls_options.hpp"
 #include "godot_cpp/core/binder_common.hpp"
+#include "godot_cpp/core/defs.hpp"
 #include "godot_cpp/templates/safe_refcount.hpp"
 #include "godot_cpp/variant/dictionary.hpp"
+#include "godot_cpp/variant/packed_byte_array.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
+#include "godot_cpp/variant/string.hpp"
 #include "icy_audio_decoder.hpp"
+#include <cstdint>
 #include <mutex>
 
 namespace godot {
@@ -18,19 +23,25 @@ class IcyHttpStream : public RefCounted {
 
 public:
 	enum Result {
-  		RESULT_STREAM_FINISHED,
-        RESULT_CANT_CONNECT,
-        RESULT_CANT_RESOLVE,
-        RESULT_CONNECTION_ERROR,
-        RESULT_TIMEOUT,
-        RESULT_REQUEST_FAILED,
-        RESULT_REDIRECT_LIMIT_REACHED,
-        RESULT_DISCONNECTED,
-        RESULT_CANCELLED,
-        RESULT_REDIRECT_FAILED
+		RESULT_STREAM_FINISHED,
+		RESULT_CANT_CONNECT,
+		RESULT_CANT_RESOLVE,
+		RESULT_CONNECTION_ERROR,
+		RESULT_TIMEOUT,
+		RESULT_REQUEST_FAILED,
+		RESULT_REDIRECT_LIMIT_REACHED,
+		RESULT_DISCONNECTED,
+		RESULT_CANCELLED,
+		RESULT_REDIRECT_FAILED
 	};
 
 private:
+	static constexpr int ICY_METADATA_BLOCK_SIZE = 16;
+	static constexpr int POLL_INTERVAL_USEC = 1000;
+	static constexpr int DEFAULT_HTTP_PORT = 80;
+	static constexpr int DEFAULT_HTTPS_PORT = 443;
+	static constexpr double MSEC_PER_SEC = 1000.0;
+
 	enum MetaState {
 		AUDIO,
 		LENGTH_BYTE,
@@ -54,6 +65,7 @@ private:
 	Ref<Thread> thread;
 	Ref<IcyAudioDecoder> audio_decoder;
 
+	// guarded by response_state_mutex; read by the public getters on the main thread
 	PackedStringArray response_headers;
 	String content_type;
 	int response_code = 0;
@@ -63,8 +75,9 @@ private:
 	SafeFlag thread_request_quit;
 	SafeFlag result_emitted;
 	SafeFlag requesting;
-	SafeFlag got_response;
+	SafeFlag request_sent;
 
+	// written by request() before the worker starts, then touched by the worker thread only
 	String request_string;
 	String url;
 	PackedStringArray request_headers;
@@ -84,10 +97,12 @@ private:
 	int meta_bytes_remaining = 0;
 	MetaState meta_state = AUDIO;
 
-	void _defer_connected();
-	void _defer_done(int p_status);
-	void _defer_data(const PackedByteArray &p_data);
-	void _defer_metadata(const String &p_meta);
+	// all of these run on the worker thread. Signals are routed through the message queue;
+	// audio data goes straight into the (thread-safe) decoder without deferring.
+	void emit_connected_deferred();
+	void finish_with_result(int p_status);
+	void forward_data_to_decoder(const PackedByteArray &p_data);
+	void emit_metadata_deferred(const String &p_meta);
 
 	void _thread_func();
 
@@ -118,6 +133,6 @@ public:
 	int get_downloaded_bytes() const;
 };
 
-}
+} //namespace godot
 
 VARIANT_ENUM_CAST(IcyHttpStream::Result);

@@ -22,13 +22,13 @@
 	<signals>
 		<signal name="buffering_started">
 			<description>
-				Emitted when the buffered audio data has been depleted and the decoder enters the buffering state.
+				Emitted when the buffered audio data has been depleted and the decoder enters the buffering state. Emitted synchronously from [method process_audio].
 			</description>
 		</signal>
 
 		<signal name="buffering_finished">
 			<description>
-				Emitted when the buffered audio data reaches the configured target threshold and buffering completes.
+				Emitted when the buffered audio data reaches the configured target threshold and buffering completes. Emitted synchronously from [method process_audio].
 			</description>
 		</signal>
 	</signals>
@@ -55,7 +55,8 @@
 		<method name="process_audio">
 			<return type="void" />
 			<description>
-				Processes decoder-specific audio handling and moves raw audio frame data into the [AudioStreamGeneratorPlayback]'s ring buffer.
+				Processes decoder-specific audio handling and moves raw audio frame data into the [AudioStreamGeneratorPlayback]'s ring buffer. Call it regularly (e.g. from a [Timer] or [method Node._process]); the decoder sizes its work to the space available in the playback.
+				[b]Note:[/b] Must be called from the main thread. All signals raised from it ([signal buffering_started], [signal buffering_finished] and decoder-specific ones such as [signal IcyMp3AudioDecoder.stream_info_ready]) are emitted directly, not deferred, so their handlers run before this method returns.
 				[b]Note:[/b] This method is intended to be implemented by derived decoder classes.
 			</description>
 		</method>

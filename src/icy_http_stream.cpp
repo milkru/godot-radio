@@ -1,11 +1,15 @@
 #include "icy_http_stream.hpp"
 #include "godot_cpp/classes/global_constants.hpp"
 #include "godot_cpp/classes/http_client.hpp"
+#include "godot_cpp/classes/os.hpp"
+#include "godot_cpp/classes/time.hpp"
 #include "godot_cpp/classes/tls_options.hpp"
+#include "godot_cpp/core/class_db.hpp"
+#include "godot_cpp/core/math.hpp"
+#include "godot_cpp/variant/callable_method_pointer.hpp"
 #include "godot_cpp/variant/packed_byte_array.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
-#include "godot_cpp/classes/time.hpp"
-#include "godot_cpp/classes/os.hpp"
+#include <cstdint>
 #include <mutex>
 
 using namespace godot;
@@ -43,15 +47,15 @@ void IcyHttpStream::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("metadata_received", PropertyInfo(Variant::STRING, "metadata")));
 
 	BIND_ENUM_CONSTANT(RESULT_STREAM_FINISHED);
-    BIND_ENUM_CONSTANT(RESULT_CANT_CONNECT);
-    BIND_ENUM_CONSTANT(RESULT_CANT_RESOLVE);
-    BIND_ENUM_CONSTANT(RESULT_CONNECTION_ERROR);
-    BIND_ENUM_CONSTANT(RESULT_TIMEOUT);
-    BIND_ENUM_CONSTANT(RESULT_REQUEST_FAILED);
-    BIND_ENUM_CONSTANT(RESULT_REDIRECT_LIMIT_REACHED);
-    BIND_ENUM_CONSTANT(RESULT_DISCONNECTED);
-    BIND_ENUM_CONSTANT(RESULT_CANCELLED);
-    BIND_ENUM_CONSTANT(RESULT_REDIRECT_FAILED);
+	BIND_ENUM_CONSTANT(RESULT_CANT_CONNECT);
+	BIND_ENUM_CONSTANT(RESULT_CANT_RESOLVE);
+	BIND_ENUM_CONSTANT(RESULT_CONNECTION_ERROR);
+	BIND_ENUM_CONSTANT(RESULT_TIMEOUT);
+	BIND_ENUM_CONSTANT(RESULT_REQUEST_FAILED);
+	BIND_ENUM_CONSTANT(RESULT_REDIRECT_LIMIT_REACHED);
+	BIND_ENUM_CONSTANT(RESULT_DISCONNECTED);
+	BIND_ENUM_CONSTANT(RESULT_CANCELLED);
+	BIND_ENUM_CONSTANT(RESULT_REDIRECT_FAILED);
 }
 
 IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
@@ -106,7 +110,7 @@ IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
 	}
 
 	if (result.port == 0) {
-		result.port = result.use_tls ? 443 : 80;
+		result.port = result.use_tls ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT;
 	}
 
 	return result;
@@ -143,7 +147,7 @@ Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse
 
 	_apply_parsed_url(parsed);
 
-	got_response.clear();
+	request_sent.clear();
 	redirections = 0;
 	downloaded.set(0);
 	{
@@ -154,7 +158,7 @@ Error IcyHttpStream::request(const String &p_url, real_t p_timeout, bool p_parse
 	}
 
 	parse_icy_metadata = p_parse_metadata;
-	timeout_msec = static_cast<uint64_t>(p_timeout * 1000.0);
+	timeout_msec = static_cast<uint64_t>(p_timeout * MSEC_PER_SEC);
 	timeout_start_msec = Time::get_singleton()->get_ticks_msec();
 
 	request_headers.clear();
@@ -191,14 +195,14 @@ void IcyHttpStream::cancel_request() {
 	}
 
 	requesting.clear();
-	got_response.clear();
+	request_sent.clear();
 	{
 		std::lock_guard<std::mutex> lock(response_state_mutex);
 		response_code = 0;
 	}
 
 	if (!result_emitted.is_set()) {
-		_defer_done(RESULT_CANCELLED);
+		finish_with_result(RESULT_CANCELLED);
 	}
 }
 
@@ -253,20 +257,20 @@ void IcyHttpStream::_thread_func() {
 	}
 
 	if (err != OK) {
-		_defer_done(RESULT_CANT_CONNECT);
+		finish_with_result(RESULT_CANT_CONNECT);
 	} else {
 		while (!thread_request_quit.is_set()) {
 			if (timeout_msec > 0) {
 				uint64_t current_ticks = Time::get_singleton()->get_ticks_msec();
 				if (current_ticks - timeout_start_msec > timeout_msec) {
-					_defer_done(RESULT_TIMEOUT);
+					finish_with_result(RESULT_TIMEOUT);
 					break;
 				}
 			}
 
 			bool exit = _update_connection();
 			if (exit) { break; }
-			OS::get_singleton()->delay_usec(1000);
+			OS::get_singleton()->delay_usec(POLL_INTERVAL_USEC);
 		}
 	}
 
@@ -281,7 +285,7 @@ bool IcyHttpStream::_update_connection() {
 
 		switch(current_status) {
 			case HTTPClient::STATUS_DISCONNECTED: {
-				_defer_done(RESULT_DISCONNECTED);
+				finish_with_result(RESULT_DISCONNECTED);
 				return true;
 			}
 			case HTTPClient::STATUS_RESOLVING:
@@ -291,27 +295,27 @@ bool IcyHttpStream::_update_connection() {
 				return false;
 			}
 			case HTTPClient::STATUS_CANT_RESOLVE: {
-				_defer_done(RESULT_CANT_RESOLVE);
+				finish_with_result(RESULT_CANT_RESOLVE);
 				return true;
 			}
 			case HTTPClient::STATUS_CANT_CONNECT: {
-				_defer_done(RESULT_CANT_CONNECT);
+				finish_with_result(RESULT_CANT_CONNECT);
 				return true;
 			}
 			case HTTPClient::STATUS_CONNECTED: {
-				if (got_response.is_set()) {
+				if (request_sent.is_set()) {
 					// reached end of chunked transfer or standard stream (unlikely for icecast unless it disconnects)
-					_defer_done(RESULT_STREAM_FINISHED);
+					finish_with_result(RESULT_STREAM_FINISHED);
 					return true;
 				}
 
 				Error err = client->request(HTTPClient::METHOD_GET, request_string, request_headers);
 				if (err != OK) {
-					_defer_done(RESULT_CONNECTION_ERROR);
+					finish_with_result(RESULT_CONNECTION_ERROR);
 					return true;
 				}
 
-				got_response.set();
+				request_sent.set();
 				return false;
 			}
 			case HTTPClient::STATUS_BODY: {
@@ -320,7 +324,7 @@ bool IcyHttpStream::_update_connection() {
 					std::lock_guard<std::mutex> lock(response_state_mutex);
 					response_pending = response_code == 0;
 				}
-				if (got_response.is_set() && response_pending) {
+				if (request_sent.is_set() && response_pending) {
 					bool ret_value;
 					if (_handle_response(&ret_value)) {
 						return ret_value;
@@ -337,7 +341,7 @@ bool IcyHttpStream::_update_connection() {
 			}
 			case HTTPClient::STATUS_CONNECTION_ERROR:
 			case HTTPClient::STATUS_TLS_HANDSHAKE_ERROR: {
-				_defer_done(RESULT_CONNECTION_ERROR);
+				finish_with_result(RESULT_CONNECTION_ERROR);
 				return true;
 			}
 		}
@@ -354,7 +358,7 @@ bool IcyHttpStream::_update_connection() {
 
 bool IcyHttpStream::_handle_response(bool *ret_value) {
 	if (!client->has_response()) {
-		_defer_done(RESULT_REQUEST_FAILED);
+		finish_with_result(RESULT_REQUEST_FAILED);
 		*ret_value = true;
 		return true;
 	}
@@ -376,7 +380,7 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 	}
 
 	if (new_response_code < 200 || new_response_code >= 300) {
-		_defer_done(RESULT_REQUEST_FAILED);
+		finish_with_result(RESULT_REQUEST_FAILED);
 		*ret_value = true;
 		return true;
 	}
@@ -407,7 +411,7 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 		if (found_content_type && found_icy_metaint) { break; }
 	}
 
-	_defer_connected();
+	emit_connected_deferred();
 
 	return false;
 }
@@ -415,7 +419,7 @@ bool IcyHttpStream::_handle_response(bool *ret_value) {
 // returns true if a follow-up request was started, false if a terminal result was emitted.
 bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
 	if (max_redirections >= 0 && redirections >= max_redirections) {
-		_defer_done(RESULT_REDIRECT_LIMIT_REACHED);
+		finish_with_result(RESULT_REDIRECT_LIMIT_REACHED);
 		return false;
 	}
 
@@ -428,14 +432,14 @@ bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
 	}
 
 	if (new_request.is_empty()) {
-		_defer_done(RESULT_REDIRECT_FAILED);
+		finish_with_result(RESULT_REDIRECT_FAILED);
 		return false;
 	}
 
 	if (new_request.begins_with("http")) {
 		ParsedUrl parsed = _parse_url(new_request);
 		if (parsed.error != OK) {
-			_defer_done(RESULT_REDIRECT_FAILED);
+			finish_with_result(RESULT_REDIRECT_FAILED);
 			return false;
 		}
 		_apply_parsed_url(parsed);
@@ -446,11 +450,11 @@ bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
 	client->close();
 	Error err = _request();
 	if (err != OK) {
-		_defer_done(RESULT_REDIRECT_FAILED);
+		finish_with_result(RESULT_REDIRECT_FAILED);
 		return false;
 	}
 
-	got_response.clear();
+	request_sent.clear();
 	{
 		std::lock_guard<std::mutex> lock(response_state_mutex);
 		response_code = 0;
@@ -465,7 +469,7 @@ bool IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
 
 void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
 	if (icy_metaint == 0 || !parse_icy_metadata) {
-		_defer_data(p_chunk);
+		forward_data_to_decoder(p_chunk);
 		return;
 	}
 
@@ -478,7 +482,7 @@ void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
 			int bytes_to_read = MIN(audio_bytes_until_meta, size - offset);
 			if (bytes_to_read > 0) {
 				PackedByteArray audio_slice = p_chunk.slice(offset, offset + bytes_to_read);
-				_defer_data(audio_slice);
+				forward_data_to_decoder(audio_slice);
 
 				offset += bytes_to_read;
 				audio_bytes_until_meta -= bytes_to_read;
@@ -490,7 +494,7 @@ void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
 		}
 		else if (meta_state == MetaState::LENGTH_BYTE) {
 			int meta_length_multiplier = rptr[offset];
-			meta_bytes_remaining = meta_length_multiplier * 16;
+			meta_bytes_remaining = meta_length_multiplier * ICY_METADATA_BLOCK_SIZE;
 			++offset;
 
 			if (meta_bytes_remaining > 0) {
@@ -512,7 +516,7 @@ void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
 			if (meta_bytes_remaining == 0) {
 				String meta_str;
 				meta_str.parse_utf8((const char*)metadata_buffer.ptr(), metadata_buffer.size());
-				_defer_metadata(meta_str);
+				emit_metadata_deferred(meta_str);
 
 				meta_state = MetaState::AUDIO;
 				audio_bytes_until_meta = icy_metaint;
@@ -521,17 +525,19 @@ void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
 	}
 }
 
-void IcyHttpStream::_defer_connected() {
+void IcyHttpStream::emit_connected_deferred() {
 	call_deferred("emit_signal", "connection_opened");
 }
 
-void IcyHttpStream::_defer_done(int p_status) {
+// emits connection_closed on the main thread and asks the worker loop to exit
+void IcyHttpStream::finish_with_result(int p_status) {
 	result_emitted.set();
 	call_deferred("emit_signal", "connection_closed", p_status);
 	thread_request_quit.set();
 }
 
-void IcyHttpStream::_defer_data(const PackedByteArray &p_data) {
+// not deferred on purpose: the decoder is thread-safe and audio data must not wait a frame in the message queue
+void IcyHttpStream::forward_data_to_decoder(const PackedByteArray &p_data) {
 	std::lock_guard<std::mutex> lock(decoder_mutex);
 
 	if (audio_decoder.is_valid()) {
@@ -539,7 +545,8 @@ void IcyHttpStream::_defer_data(const PackedByteArray &p_data) {
 	}
 }
 
-void IcyHttpStream::_defer_metadata(const String &p_meta) {
+// string cleanup happens here on the worker thread, only the emit is deferred
+void IcyHttpStream::emit_metadata_deferred(const String &p_meta) {
 	// icecast pads metadata with null bytes, strip before emitting
 	String clean_meta = p_meta.strip_edges().replace(String::chr(0), "");
 	if (!clean_meta.is_empty()) {

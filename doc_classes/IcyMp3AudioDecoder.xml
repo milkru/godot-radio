@@ -6,11 +6,12 @@
 	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
 >
 	<brief_description>
- 		Audio decoder implementation for MP3 streams.
+		Audio decoder implementation for MP3 streams.
 	</brief_description>
 
 	<description>
-		[IcyMp3AudioDecoder] implements live decoding of MP3 streams (MIME type [code]audio/mpeg[/code]).
+		[IcyMp3AudioDecoder] implements live decoding of MP3 streams. It is registered with [method IcyAudioDecoder.create_for_mime_type] under [code]audio/mpeg[/code], [code]audio/mp3[/code], [code]audio/x-mpeg[/code] and [code]audio/mpeg3[/code].
+		Incoming encoded data is held in a fixed 512 KiB jitter buffer; when it overflows the oldest bytes are dropped and [signal buffer_overrun] is emitted.
 	</description>
 
 	<tutorials>
@@ -19,14 +20,14 @@
 	<signals>
 		<signal name="stream_info_ready">
 			<description>
-				Emitted when the decoder has read enough of the MP3 stream to determine its sample rate and channel count.
+				Emitted from inside [method IcyAudioDecoder.process_audio] (synchronously, on the main thread) once the decoder has read enough of the MP3 stream to determine its sample rate and channel count. This happens before a playback is required, so a handler can set the generator's [code]mix_rate[/code] from [method get_stream_sample_rate], start the player and then call [method IcyAudioDecoder.set_playback] with the freshly created playback. No audio is decoded until a playback has been set.
 			</description>
 		</signal>
 
 		<signal name="buffer_overrun">
 			<param index="0" name="dropped_bytes" type="int" />
 			<description>
-				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (512 KiB) overflows. The oldest [code]dropped_bytes[/code] bytes are discarded so playback stays near the live edge. Usually means [method IcyAudioDecoder.process_audio] is not being called regularly.
+				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (512 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Usually means [method IcyAudioDecoder.process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
 			</description>
 		</signal>
 	</signals>
@@ -36,7 +37,7 @@
 			<return type="void" />
 			<param index="0" name="kbps" type="int" />
 			<description>
-				Calculates the byte threshold required for the decoder to begin decoding audio data based on the specified [code]kbps[/code] value. If this method is not called, the decoder assumes a default bitrate of 128 kbps. The threshold is calculated using the formula [code](kbps * 1000) / 8[/code].
+				Sets the amount of encoded data (in bytes) that must be buffered before decoding starts, and before it resumes after the buffer has drained, to roughly one second of audio at [param kbps]. The threshold is [code]max((kbps * 1000) / 8, 16384)[/code]; the [code]16384[/code] floor is the minimum chunk the underlying MP3 decoder reads per pull, so streams below 128 kbps all use the floor (which for them is more than one second of audio). If this method is not called, the floor is used, which matches a 128 kbps stream. Non-positive values are ignored.
 			</description>
 		</method>
 
