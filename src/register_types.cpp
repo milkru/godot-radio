@@ -8,6 +8,7 @@
 #include "icy_audio_decoder.hpp"
 #include "icy_mp3_audio_decoder.hpp"
 #include "icy_http_stream.hpp"
+#include "icy_radio_player.hpp"
 
 using namespace godot;
 
@@ -18,6 +19,7 @@ void initialize_gdextension_types(ModuleInitializationLevel p_level) {
 	GDREGISTER_ABSTRACT_CLASS(IcyAudioDecoder);
 	GDREGISTER_CLASS(IcyMp3AudioDecoder);
 	GDREGISTER_CLASS(IcyHttpStream);
+	GDREGISTER_CLASS(IcyRadioPlayer);
 
 	IcyAudioDecoder::register_decoder("audio/mpeg", &IcyMp3AudioDecoder::create_instance);
 	IcyAudioDecoder::register_decoder("audio/mp3", &IcyMp3AudioDecoder::create_instance);

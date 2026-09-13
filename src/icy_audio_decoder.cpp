@@ -94,16 +94,16 @@ void IcyAudioDecoder::set_buffer_thresholds(int p_target_frames) {
 	target_buffer_frames = p_target_frames;
 }
 
-void IcyAudioDecoder::set_min_byte_threshold(size_t p_bytes) {
-	min_byte_threshold = p_bytes;
-	byte_threshold = MAX(byte_threshold, min_byte_threshold);
+// one second of encoded audio at the given bitrate, never below the floor
+size_t IcyAudioDecoder::_threshold_for_bitrate(int p_kbps) {
+	const size_t computed = (static_cast<size_t>(p_kbps) * BITS_PER_KILOBIT) / BITS_PER_BYTE;
+	return MAX(computed, MIN_BYTE_THRESHOLD);
 }
 
 void IcyAudioDecoder::set_bitrate_hint(int p_kbps) {
 	if (p_kbps <= 0) { return; }
-	// one second of encoded audio at the given bitrate
-	size_t computed = (static_cast<size_t>(p_kbps) * BITS_PER_KILOBIT) / BITS_PER_BYTE;
-	byte_threshold = MAX(computed, min_byte_threshold);
+	byte_threshold = _threshold_for_bitrate(p_kbps);
+	is_bitrate_hinted = true;
 }
 
 void IcyAudioDecoder::push_encoded_data(const PackedByteArray &p_data) {
@@ -178,6 +178,7 @@ void IcyAudioDecoder::reset() {
 	}
 
 	_reset_codec();
+	pending = DecodedBatch();
 	stream_sample_rate = 0;
 	stream_channels = 0;
 	is_stream_info_known = false;
@@ -188,74 +189,100 @@ void IcyAudioDecoder::reset() {
 }
 
 void IcyAudioDecoder::process_audio() {
-	// stream info is probed before a playback is required, so the caller can size the generator
-	// (mix_rate) from stream_info_ready and only then hand over a correctly sized playback
-	if (!is_stream_info_known) {
-		{
-			std::lock_guard<std::mutex> lock(buffer_mutex);
-			if (total_buffered_bytes < byte_threshold) { return; }
-		}
-
-		if (!_probe_stream()) {
-			// a failed probe has eaten byte_threshold bytes; on a mislabelled stream (AAC behind audio/mpeg
-			// is common on SHOUTcast v1) this would otherwise repeat silently forever
-			++probe_failures;
-			if (probe_failures == MAX_PROBE_FAILURES) {
-				const String message = "IcyAudioDecoder: could not detect the stream format after " + itos(probe_failures) + " attempts. Is the content type correct?";
-				ERR_PRINT(message);
-				emit_signal("stream_error", message);
-			}
-			return;
-		}
-		ERR_FAIL_COND_MSG(stream_channels < 1 || stream_channels > MAX_CHANNELS, "IcyAudioDecoder: unsupported channel count " + itos(stream_channels));
-
-		is_stream_info_known = true;
-		probe_failures = 0;
-		// main thread, emitted directly; a handler may call set_playback() here
-		emit_signal("stream_info_ready");
-	}
-
-	if (playback.is_null()) { return; }
-
 	while (true) {
-		if (playback->get_frames_available() < MAX_BATCH_FRAMES) { break; }
+		if (pending.frames == 0) {
+			// the first batch is decoded before a playback is required: its format is announced through
+			// stream_info_ready so the caller can size the generator (mix_rate) and only then hand over a
+			// correctly sized playback
+			if (is_stream_info_known && !_has_room_for_batch()) { break; }
 
-		{
-			std::lock_guard<std::mutex> lock(buffer_mutex);
 			if (is_decode_gated) {
+				std::lock_guard<std::mutex> lock(buffer_mutex);
 				if (total_buffered_bytes < byte_threshold) { break; }
-				is_decode_gated = false;
+			}
+			is_decode_gated = false;
+
+			pending = _decode_frames(pcm_buffer, MAX_BATCH_FRAMES);
+			if (pending.frames <= 0) {
+				pending.frames = 0;
+				// the codec ran dry (the ring and whatever it stages itself) - rebuffer to byte_threshold before resuming
+				is_decode_gated = true;
+				if (!is_stream_info_known) { _count_probe_failure(); }
+				break;
+			}
+			if (pending.channels < 1 || pending.channels > MAX_CHANNELS || pending.frames > MAX_BATCH_FRAMES) {
+				const String message = "IcyAudioDecoder: codec returned an invalid batch (" + itos(pending.frames) + " frames, " + itos(pending.channels) + " channels)";
+				pending.frames = 0;
+				ERR_FAIL_MSG(message);
 			}
 		}
 
-		int frames_mixed = _decode_frames(pcm_buffer, MAX_BATCH_FRAMES);
-
-		if (frames_mixed < MAX_BATCH_FRAMES) {
-			// the codec ran dry (its own buffer and the ring) - rebuffer to byte_threshold before resuming
-			is_decode_gated = true;
-			if (frames_mixed <= 0) { break; }
+		// first batch, or the station switched sample rate mid-stream. The generator's mix_rate cannot follow a
+		// live playback, so this goes back to the caller through stream_info_ready; a channel change is absorbed
+		// below, because the conversion uses the batch's own layout
+		if (pending.sample_rate != stream_sample_rate) {
+			_announce_stream_info();
 		}
+		stream_channels = pending.channels;
 
-		godot_frames.resize(frames_mixed);
-		Vector2 *out_ptr = godot_frames.ptrw();
-		const float *in_ptr = pcm_buffer;
-
-		if (stream_channels == 2) {
-			for (int i = 0; i < frames_mixed; ++i) {
-				out_ptr[i] = Vector2(in_ptr[i * 2], in_ptr[i * 2 + 1]);
-			}
-		} else {
-			for (int i = 0; i < frames_mixed; ++i) {
-				out_ptr[i] = Vector2(in_ptr[i], in_ptr[i]);
-			}
-		}
-
-		playback->push_buffer(godot_frames);
+		// the batch stays pending until a playback with room for it has been set
+		if (!_has_room_for_batch()) { break; }
+		_push_pending_batch();
 	}
 
 	// evaluated after the loop so the state describes the generator as this tick leaves it: an underrun
 	// that was refilled above reports buffering_finished now instead of one tick later
 	update_buffering_state();
+}
+
+bool IcyAudioDecoder::_has_room_for_batch() const {
+	return playback.is_valid() && playback->get_frames_available() >= MAX_BATCH_FRAMES;
+}
+
+void IcyAudioDecoder::_count_probe_failure() {
+	// a failed first decode has eaten byte_threshold bytes; on a mislabelled stream (AAC behind audio/mpeg
+	// is common on SHOUTcast v1) this would otherwise repeat silently forever
+	++probe_failures;
+	if (probe_failures == MAX_PROBE_FAILURES) {
+		const String message = "IcyAudioDecoder: could not detect the stream format after " + itos(probe_failures) + " attempts. Is the content type correct?";
+		ERR_PRINT(message);
+		emit_signal("stream_error", message);
+	}
+}
+
+void IcyAudioDecoder::_announce_stream_info() {
+	stream_sample_rate = pending.sample_rate;
+	stream_channels = pending.channels;
+	is_stream_info_known = true;
+	probe_failures = 0;
+
+	// the first decode had to be gated on the floor; from here on the codec's own bitrate sizes the
+	// rebuffer amount unless the caller supplied one (icy-br)
+	if (!is_bitrate_hinted && pending.bitrate_kbps > 0) {
+		byte_threshold = _threshold_for_bitrate(pending.bitrate_kbps);
+	}
+
+	// main thread, emitted directly; a handler is expected to call set_playback() here
+	emit_signal("stream_info_ready");
+}
+
+void IcyAudioDecoder::_push_pending_batch() {
+	godot_frames.resize(pending.frames);
+	Vector2 *out_ptr = godot_frames.ptrw();
+	const float *in_ptr = pcm_buffer;
+
+	if (pending.channels == 2) {
+		for (int i = 0; i < pending.frames; ++i) {
+			out_ptr[i] = Vector2(in_ptr[i * 2], in_ptr[i * 2 + 1]);
+		}
+	} else {
+		for (int i = 0; i < pending.frames; ++i) {
+			out_ptr[i] = Vector2(in_ptr[i], in_ptr[i]);
+		}
+	}
+
+	playback->push_buffer(godot_frames);
+	pending.frames = 0;
 }
 
 void IcyAudioDecoder::update_buffering_state() {
@@ -267,11 +294,20 @@ void IcyAudioDecoder::update_buffering_state() {
 	}
 	const int buffered_frames = max_capacity_buffer_frames - frames_available;
 
+	// a target above what the generator can hold would never be reached; the capacity is an observation,
+	// so the clamp lives here rather than in the setter
+	int target_frames = target_buffer_frames;
+	if (target_frames > max_capacity_buffer_frames) {
+		WARN_PRINT_ONCE("IcyAudioDecoder: target buffer frames exceed the playback's capacity, clamping. Increase the generator's buffer_length or lower set_buffer_thresholds().");
+		target_frames = max_capacity_buffer_frames;
+	}
+	target_frames = MAX(target_frames, 1);
+
 	if (is_buffering) {
-		buffering_progress = static_cast<real_t>(buffered_frames) / static_cast<real_t>(target_buffer_frames);
+		buffering_progress = static_cast<real_t>(buffered_frames) / static_cast<real_t>(target_frames);
 		buffering_progress = MIN(buffering_progress, 1.0f);
 
-		if (buffered_frames >= target_buffer_frames) {
+		if (buffered_frames >= target_frames) {
 			is_buffering = false;
 			buffering_progress = 1.0;
 			emit_signal("buffering_finished");

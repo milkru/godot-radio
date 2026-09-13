@@ -11,8 +11,9 @@
 
 	<description>
 		[IcyHttpStream] establishes HTTP connections to Icecast-compatible servers and continuously downloads streaming audio data on a dedicated thread.
-		If an AudioDecoder is assigned, downloaded data chunks are forwarded to it for decoding. Otherwise, the stream remains active and incoming data is discarded.
-		The class can optionally parse ICY metadata embedded in the stream and emits signals for connection state changes and metadata updates.
+		After the response headers are received, the stream creates an [IcyAudioDecoder] for the [code]Content-Type[/code] header (see [method IcyAudioDecoder.create_for_mime_type]), sets the bitrate from the [code]icy-br[/code] header on it, and sends all downloaded data to it. Get the decoder with [method get_audio_decoder] in the [signal connection_opened] handler. If no decoder is registered for the content type, the connection is closed with [constant RESULT_UNSUPPORTED_FORMAT]. If a decoder was set with [method set_audio_decoder], that one is used instead.
+		SHOUTcast v1 servers answer with an [code]ICY 200 OK[/code] line instead of an HTTP status line. These are accepted, and the ICY status code is returned by [method get_response_code] like an HTTP code.
+		The class can also parse ICY metadata embedded in the stream, and emits signals for connection changes and metadata. [IcyRadioPlayer] combines this class with a player node for the common case.
 	</description>
 
 	<tutorials>
@@ -21,7 +22,7 @@
 	<signals>
 		<signal name="connection_opened">
 			<description>
-				Emitted when a connection to the streaming server has been successfully established and data reception begins.
+				Emitted when the connection to the server is open and data starts to arrive. The decoder for this connection already exists at this point ([method get_audio_decoder]). Connect to its signals here.
 			</description>
 		</signal>
 
@@ -46,7 +47,7 @@
 			<return type="int" enum="Error" />
 
 			<param index="0" name="url" type="String" />
-			<param index="1" name="timeout" type="float" default="5.0" />
+			<param index="1" name="connect_timeout" type="float" default="5.0" />
 			<param index="2" name="parse_metadata" type="bool" default="false" />
 			<param
 				index="3"
@@ -60,7 +61,7 @@
 				If the connection succeeds, the stream begins downloading data continuously on a dedicated thread until the connection is closed or interrupted.
 				Returns [constant OK] if the request was started, [constant ERR_INVALID_PARAMETER] if [param url] is malformed (missing or unsupported scheme; only [code]http://[/code] and [code]https://[/code] are accepted), or [constant ERR_BUSY] if a request is already active. Connection failures that happen after this call returns are reported asynchronously through [signal connection_closed].
 				[param url] specifies the URL of the Icecast stream.
-				[param timeout] specifies the connection timeout in seconds.
+				[param connect_timeout] is how many seconds the stream waits for the response headers before it gives up with [constant RESULT_TIMEOUT]. This covers name resolution, connecting, the TLS handshake, the request and any redirects. [code]0[/code] disables it. After the headers are received, [member stall_timeout] is used instead.
 				If [param parse_metadata] is [code]true[/code], ICY metadata embedded in the stream is parsed and exposed through the appropriate signals.
 				[param custom_headers] specifies additional HTTP headers to include in the request such as user agent or bearer token. Each entry must be formatted as [code]"Header-Name: Value"[/code].
 			</description>
@@ -99,6 +100,14 @@
 			</description>
 		</method>
 
+		<method name="get_audio_decoder" qualifiers="const">
+			<return type="IcyAudioDecoder" />
+
+			<description>
+				Returns the decoder that receives the data of the current connection: either the one the stream created for the content type, or the one set with [method set_audio_decoder]. Available from the [signal connection_opened] handler on. [code]null[/code] before the first connection is open.
+			</description>
+		</method>
+
 		<method name="get_response_headers" qualifiers="const">
 			<return type="PackedStringArray" />
 
@@ -129,11 +138,16 @@
 			<param index="0" name="audio_decoder" type="IcyAudioDecoder" />
 
 			<description>
-				Sets audio decoder to which downloaded data chunks will be forwarded. Data is pushed into the decoder directly from the download thread; it is not routed through the main thread.
-				[b]Note:[/b] Body bytes that arrive before a decoder is attached are discarded, so attach it from the [signal connection_opened] handler. Because that signal is delivered deferred while the download continues, the first chunk of the stream is best-effort: a raw MP3 stream resynchronises on the next frame, but a container format that needs its header pages would not.
+				Sets the decoder that receives the downloaded data, instead of letting the stream create one for each connection from the content type. Call it before [method request]. The same decoder is then used for every connection until it is replaced, and the stream does not set [code]icy-br[/code] on it. Pass [code]null[/code] to let the stream create decoders again. Data is pushed into the decoder directly from the download thread, not through the main thread.
 			</description>
 		</method>
 	</methods>
+
+	<members>
+		<member name="stall_timeout" type="float" setter="set_stall_timeout" getter="get_stall_timeout" default="10.0">
+			If no data arrives for this many seconds, the connection is closed with [constant RESULT_TIMEOUT]. The timer restarts with every received chunk. [code]0[/code] disables it. Keep it longer than the decoder's buffer (about 8 seconds at 128 kbps), so a short network problem that the buffer can cover does not close the connection. The value is read when [method request] is called.
+		</member>
+	</members>
 
 	<constants>
 		<constant name="RESULT_STREAM_FINISHED" value="0" enum="Result">
@@ -149,10 +163,10 @@
 			The connection failed while sending the request or during the TLS handshake.
 		</constant>
 		<constant name="RESULT_TIMEOUT" value="4" enum="Result">
-			No data was received within the timeout passed to [method request].
+			The response headers did not arrive within the [code]connect_timeout[/code] passed to [method request], or no data arrived for longer than [member stall_timeout].
 		</constant>
 		<constant name="RESULT_REQUEST_FAILED" value="5" enum="Result">
-			The server returned no response or a non-2xx status code. Use [method get_response_code] to inspect the status.
+			The server returned no response or a non-2xx status code (HTTP or ICY). Use [method get_response_code] to inspect the status.
 		</constant>
 		<constant name="RESULT_REDIRECT_LIMIT_REACHED" value="6" enum="Result">
 			The server redirected more times than allowed.
@@ -165,6 +179,9 @@
 		</constant>
 		<constant name="RESULT_REDIRECT_FAILED" value="9" enum="Result">
 			A redirect response was received but could not be followed: the [code]Location[/code] header was missing or malformed, or the connection to the redirect target failed.
+		</constant>
+		<constant name="RESULT_UNSUPPORTED_FORMAT" value="10" enum="Result">
+			No decoder is registered for the [code]Content-Type[/code] of the response (see [method get_content_mime_type]). Not used when a decoder was set with [method set_audio_decoder].
 		</constant>
 	</constants>
 </class>

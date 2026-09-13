@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class
+	name="IcyRadioPlayer"
+	inherits="Node"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
+>
+	<brief_description>
+		Plays an Icecast/SHOUTcast stream through an audio player node.
+	</brief_description>
+
+	<description>
+		[IcyRadioPlayer] is the simplest way to use the addon. Set [member player_path] to an [AudioStreamPlayer], [AudioStreamPlayer2D] or [AudioStreamPlayer3D], call [method play], and the node does the rest:
+		- it opens the connection with its own [IcyHttpStream],
+		- it uses the [IcyAudioDecoder] that the stream creates for the server's content type,
+		- it sets the player's [AudioStreamGenerator] to the stream's sample rate and starts the player,
+		- it feeds the decoder from [method Node._process],
+		- it pauses the player while buffering, and
+		- it reconnects after [member reconnect_delay] when the connection is lost.
+		If the player already has an [AudioStreamGenerator], that one is used, so [code]buffer_length[/code] can be set in the inspector. Otherwise the node creates one with a 2 second buffer.
+		The objects it uses are available through [method get_http_stream], [method get_audio_decoder] and [method get_stream]. The three classes can also be used without this node.
+		[b]Note:[/b] Audio is fed from [method Node._process]. The node must keep processing while the stream is playing (see [member Node.process_mode]).
+	</description>
+
+	<tutorials>
+	</tutorials>
+
+	<signals>
+		<signal name="state_changed">
+			<param index="0" name="state" type="int" enum="IcyRadioPlayer.State" />
+			<description>
+				Emitted every time [method get_state] changes.
+			</description>
+		</signal>
+
+		<signal name="metadata_received">
+			<param index="0" name="title" type="String" />
+			<description>
+				Emitted when the server sends ICY metadata (needs [member parse_metadata]). [param title] is the value of [code]StreamTitle[/code], usually [code]Artist - Title[/code]. If the metadata has no [code]StreamTitle[/code], the raw metadata string is passed instead.
+			</description>
+		</signal>
+
+		<signal name="stream_failed">
+			<param index="0" name="result" type="int" enum="IcyHttpStream.Result" />
+			<param index="1" name="http_code" type="int" />
+			<description>
+				Emitted when the connection is lost or could not be opened. [param result] is the [enum IcyHttpStream.Result] and [param http_code] is the HTTP status code, or [code]0[/code] if there was none. The state is already [constant STATE_RECONNECTING] or [constant STATE_FAILED] when this is emitted, so a handler can call [method play] or [method stop] to change what happens next. Not emitted when [method stop] is called.
+			</description>
+		</signal>
+	</signals>
+
+	<methods>
+		<method name="play">
+			<return type="int" enum="Error" />
+			<param index="0" name="url" type="String" />
+			<param index="1" name="custom_headers" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Stops the current stream, if any, and connects to [param url]. [param custom_headers] are passed to [method IcyHttpStream.request] (for example a [code]User-Agent[/code] header). Returns [constant ERR_UNCONFIGURED] if [member player_path] does not point to a usable player node, or the error returned by [method IcyHttpStream.request]. Errors that happen later are reported through [signal stream_failed].
+			</description>
+		</method>
+
+		<method name="stop">
+			<return type="void" />
+			<description>
+				Closes the connection, stops the player and goes to [constant STATE_IDLE]. Does not reconnect.
+			</description>
+		</method>
+
+		<method name="get_state" qualifiers="const">
+			<return type="int" enum="IcyRadioPlayer.State" />
+			<description>
+				Returns the current [enum State].
+			</description>
+		</method>
+
+		<method name="get_stream" qualifiers="const">
+			<return type="AudioStreamGenerator" />
+			<description>
+				Returns the [AudioStreamGenerator] used to play the audio, or [code]null[/code] before the first [method play].
+			</description>
+		</method>
+
+		<method name="get_http_stream" qualifiers="const">
+			<return type="IcyHttpStream" />
+			<description>
+				Returns the [IcyHttpStream] owned by this node. Useful for reading the response headers or the number of downloaded bytes.
+			</description>
+		</method>
+
+		<method name="get_audio_decoder" qualifiers="const">
+			<return type="IcyAudioDecoder" />
+			<description>
+				Returns the decoder of the current connection (for buffering progress or the stream format), or [code]null[/code] when no connection is open.
+			</description>
+		</method>
+	</methods>
+
+	<members>
+		<member name="player_path" type="NodePath" setter="set_player_path" getter="get_player_path" default="NodePath(&quot;&quot;)">
+			Path to the [AudioStreamPlayer], [AudioStreamPlayer2D] or [AudioStreamPlayer3D] that plays the stream.
+		</member>
+		<member name="target_buffer" type="float" setter="set_target_buffer" getter="get_target_buffer" default="0.5">
+			How many seconds of decoded audio must be in the generator before playback starts, or resumes after it ran out of audio. Must be smaller than the generator's [code]buffer_length[/code].
+		</member>
+		<member name="reconnect_delay" type="float" setter="set_reconnect_delay" getter="get_reconnect_delay" default="2.0">
+			How many seconds to wait before reconnecting after the connection is lost or fails. [code]0[/code] disables reconnecting; the node goes to [constant STATE_FAILED] instead. An unsupported content type never reconnects.
+		</member>
+		<member name="connect_timeout" type="float" setter="set_connect_timeout" getter="get_connect_timeout" default="5.0">
+			Passed to [method IcyHttpStream.request] as the connect timeout.
+		</member>
+		<member name="stall_timeout" type="float" setter="set_stall_timeout" getter="get_stall_timeout" default="10.0">
+			Same as [member IcyHttpStream.stall_timeout].
+		</member>
+		<member name="parse_metadata" type="bool" setter="set_parse_metadata" getter="get_parse_metadata" default="true">
+			If [code]true[/code], ICY metadata is requested from the server and reported through [signal metadata_received].
+		</member>
+	</members>
+
+	<constants>
+		<constant name="STATE_IDLE" value="0" enum="State">
+			Nothing is playing. [method play] was not called yet, or [method stop] was called.
+		</constant>
+		<constant name="STATE_CONNECTING" value="1" enum="State">
+			Waiting for the server to respond.
+		</constant>
+		<constant name="STATE_BUFFERING" value="2" enum="State">
+			Connected. The player is paused until [member target_buffer] seconds of audio are buffered.
+		</constant>
+		<constant name="STATE_PLAYING" value="3" enum="State">
+			Audio is playing.
+		</constant>
+		<constant name="STATE_RECONNECTING" value="4" enum="State">
+			The connection was lost. A new connection is opened after [member reconnect_delay].
+		</constant>
+		<constant name="STATE_FAILED" value="5" enum="State">
+			The connection failed and the node will not reconnect (see [signal stream_failed]). Call [method play] to try again.
+		</constant>
+	</constants>
+</class>

@@ -33,7 +33,8 @@ public:
 		RESULT_REDIRECT_LIMIT_REACHED,
 		RESULT_DISCONNECTED,
 		RESULT_CANCELLED,
-		RESULT_REDIRECT_FAILED
+		RESULT_REDIRECT_FAILED,
+		RESULT_UNSUPPORTED_FORMAT
 	};
 
 private:
@@ -43,6 +44,8 @@ private:
 	static constexpr int DEFAULT_HTTP_PORT = 80;
 	static constexpr int DEFAULT_HTTPS_PORT = 443;
 	static constexpr double MSEC_PER_SEC = 1000.0;
+	static constexpr real_t DEFAULT_CONNECT_TIMEOUT = 5.0;
+	static constexpr real_t DEFAULT_STALL_TIMEOUT = 10.0;
 
 	enum class PollStep {
 		KEEP_POLLING,
@@ -57,14 +60,17 @@ private:
 		Error error = OK;
 	};
 
-	std::mutex decoder_mutex;
+	mutable std::mutex decoder_mutex;
 	std::mutex client_mutex;
 	mutable std::mutex response_state_mutex;
 
 	Ref<HTTPClient> client;
 	Ref<TLSOptions> tls_options;
 	Ref<Thread> thread;
+	// guarded by decoder_mutex. The stream creates the decoder itself from the content type unless the caller
+	// supplied one through set_audio_decoder()
 	Ref<IcyAudioDecoder> audio_decoder;
+	bool is_decoder_user_supplied = false;
 
 	// guarded by response_state_mutex; read by the public getters on the main thread
 	PackedStringArray response_headers;
@@ -75,7 +81,9 @@ private:
 	SafeFlag thread_request_quit;
 	SafeFlag result_emitted;
 	SafeFlag requesting;
-	SafeFlag request_sent;
+
+	// main thread only
+	real_t stall_timeout = DEFAULT_STALL_TIMEOUT;
 
 	// written by request() before the worker starts, then touched by the worker thread only
 	String request_string;
@@ -83,13 +91,17 @@ private:
 	PackedStringArray request_headers;
 	IcyMetadataDemuxer icy_demuxer;
 
+	// the connect timeout applies until the response headers are in (redirects included), then the stall timeout
+	// takes over and is restarted by every body chunk; 0 disables the one it is copied into
 	uint64_t timeout_msec = 0;
 	uint64_t timeout_start_msec = 0;
+	uint64_t stall_timeout_msec = 0;
 
 	int redirections = 0;
 	int port = 0;
 	bool use_tls = false;
 	bool parse_icy_metadata = false;
+	bool request_sent = false;
 
 	// all of these run on the worker thread. Signals are routed through the message queue;
 	// audio data goes straight into the (thread-safe) decoder without deferring.
@@ -106,6 +118,8 @@ private:
 	Error _connect_socket();
 	// caller must hold client_mutex; called only while response_code == 0
 	PollStep _handle_response();
+	// creates the decoder for p_content_type unless the caller supplied one; STOP if no decoder is registered
+	PollStep _attach_decoder(const String &p_content_type, int p_bitrate_kbps);
 	// caller must hold client_mutex
 	PollStep _follow_redirect(const PackedStringArray &p_headers);
 
@@ -120,15 +134,19 @@ public:
 	IcyHttpStream();
 	~IcyHttpStream();
 
-	Error request(const String &p_url, real_t p_timeout = 5.0, bool p_parse_metadata = false, const PackedStringArray &p_custom_headers = PackedStringArray());
+	Error request(const String &p_url, real_t p_connect_timeout = DEFAULT_CONNECT_TIMEOUT, bool p_parse_metadata = false, const PackedStringArray &p_custom_headers = PackedStringArray());
 	void cancel_request();
 	bool is_requesting() const;
+	// read by request(); takes effect on the next request
+	void set_stall_timeout(real_t p_seconds);
+	real_t get_stall_timeout() const;
 	String get_content_mime_type() const;
 	int get_response_code() const;
-	// connection_opened is deferred while the worker keeps reading the body, so bytes that arrive before a
-	// decoder is attached are dropped. Attach it inside the connection_opened handler; the leading bytes are
-	// best-effort (a raw MP3 stream resyncs, a container needing its header pages would not)
+	// optional: a decoder supplied here (before request()) is used as is, for every connection, and the stream
+	// does not apply icy-br to it. Pass null to go back to letting the stream create one per connection
 	void set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder);
+	// the decoder receiving this connection's data; created by the time connection_opened is emitted
+	Ref<IcyAudioDecoder> get_audio_decoder() const;
 	PackedStringArray get_response_headers() const;
 	Dictionary get_response_headers_as_dictionary() const;
 	int get_downloaded_bytes() const;

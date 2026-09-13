@@ -1,7 +1,7 @@
 #include "icy_mp3_audio_decoder.hpp"
-#include "godot_cpp/core/class_db.hpp"
-#include "godot_cpp/core/math.hpp"
+#include "godot_cpp/core/error_macros.hpp"
 #include "godot_cpp/core/memory.hpp"
+#include <cstring>
 
 #define DR_MP3_FLOAT_OUTPUT
 #define DR_MP3_IMPLEMENTATION
@@ -11,12 +11,7 @@
 using namespace godot;
 
 IcyMp3AudioDecoder::IcyMp3AudioDecoder() {
-	// the smallest pull dr_mp3 will make, so it is also the lowest usable threshold (~1s at 128kbps)
-	set_min_byte_threshold(DRMP3_MIN_DATA_CHUNK_SIZE);
-}
-
-IcyMp3AudioDecoder::~IcyMp3AudioDecoder() {
-	IcyMp3AudioDecoder::_reset_codec();
+	drmp3dec_init(&dec);
 }
 
 Ref<IcyAudioDecoder> IcyMp3AudioDecoder::create_instance() {
@@ -26,50 +21,34 @@ Ref<IcyAudioDecoder> IcyMp3AudioDecoder::create_instance() {
 void IcyMp3AudioDecoder::_bind_methods() {
 }
 
-size_t IcyMp3AudioDecoder::on_read_callback(void *p_user_data, void *p_buffer_out, size_t bytes_to_read) {
-	IcyMp3AudioDecoder *decoder = static_cast<IcyMp3AudioDecoder *>(p_user_data);
-	// dr_mp3 asks for up to 64 KiB per refill (~4s at 128kbps) but only needs 16 KiB to continue. Capping the
-	// handout keeps its private hoard at <= 32 KiB and leaves the surplus in the jitter ring, where the
-	// drop-oldest policy governs live-edge latency; it does not affect correctness
-	return decoder->read_encoded(static_cast<uint8_t *>(p_buffer_out), MIN(bytes_to_read, static_cast<size_t>(DRMP3_MIN_DATA_CHUNK_SIZE)));
-}
+// one MP3 frame per call (<= 1152 PCM frames). drmp3dec_decode_frame() reports in frame_bytes how much input it
+// consumed: a decoded frame, or junk it skipped while resyncing (frames == 0), in which case it is called again
+IcyAudioDecoder::DecodedBatch IcyMp3AudioDecoder::_decode_frames(float *r_interleaved, int p_max_frames) {
+	DecodedBatch batch;
+	ERR_FAIL_COND_V_MSG(p_max_frames < DRMP3_MAX_PCM_FRAMES_PER_MP3_FRAME, batch, "IcyMp3AudioDecoder: batch buffer smaller than one MP3 frame");
 
-void *IcyMp3AudioDecoder::on_malloc(size_t p_size, void *p_user_data) {
-	return memalloc(p_size);
-}
+	while (true) {
+		staged += static_cast<int>(read_encoded(staging + staged, static_cast<size_t>(STAGING_CAPACITY - staged)));
+		if (staged < MIN_LOOKAHEAD) { return batch; }
 
-void *IcyMp3AudioDecoder::on_realloc(void *p_ptr, size_t p_size, void *p_user_data) {
-	return memrealloc(p_ptr, p_size);
-}
+		drmp3dec_frame_info info;
+		const int frames = drmp3dec_decode_frame(&dec, staging, staged, r_interleaved, &info);
+		if (info.frame_bytes <= 0) { return batch; }
 
-void IcyMp3AudioDecoder::on_free(void *p_ptr, void *p_user_data) {
-	if (p_ptr != nullptr) {
-		memfree(p_ptr);
+		staged -= info.frame_bytes;
+		memmove(staging, staging + info.frame_bytes, static_cast<size_t>(staged));
+
+		if (frames > 0) {
+			batch.frames = frames;
+			batch.channels = info.channels;
+			batch.sample_rate = info.sample_rate;
+			batch.bitrate_kbps = info.bitrate_kbps;
+			return batch;
+		}
 	}
-}
-
-bool IcyMp3AudioDecoder::_probe_stream() {
-	static const drmp3_allocation_callbacks allocation_callbacks = { nullptr, on_malloc, on_realloc, on_free };
-
-	if (!drmp3_init(&mp3, on_read_callback, nullptr, nullptr, nullptr, this, &allocation_callbacks)) {
-		return false;
-	}
-
-	is_initialized = true;
-	stream_sample_rate = static_cast<int>(mp3.sampleRate);
-	stream_channels = static_cast<int>(mp3.channels);
-	return true;
-}
-
-int IcyMp3AudioDecoder::_decode_frames(float *r_interleaved, int p_max_frames) {
-	// atEnd latches when the read callback returns 0; the stream is live, so clear it before every pull
-	mp3.atEnd = 0;
-	return static_cast<int>(drmp3_read_pcm_frames_f32(&mp3, static_cast<drmp3_uint64>(p_max_frames), r_interleaved));
 }
 
 void IcyMp3AudioDecoder::_reset_codec() {
-	if (is_initialized) {
-		drmp3_uninit(&mp3);
-		is_initialized = false;
-	}
+	drmp3dec_init(&dec);
+	staged = 0;
 }

@@ -10,10 +10,14 @@
 	</brief_description>
 
 	<description>
-		[IcyAudioDecoder] is the base class for audio stream decoders and owns the whole streaming pipeline: incoming encoded data is held in a fixed 128 KiB jitter buffer (about 8 seconds at 128 kbps; when it overflows the oldest bytes are dropped and [signal buffer_overrun] is emitted, which keeps playback near the live edge after a stall), decoded in fixed-size batches from [method process_audio] and pushed into an [AudioStreamGeneratorPlayback]. It also provides the buffering mechanism, including configurable buffer thresholds, buffering state tracking, and notifications when buffering starts or finishes.
-		Decoding does not start until roughly one second of encoded data has been buffered (see [method set_bitrate_hint]); the same amount is buffered again whenever the codec runs out of data.
+		[IcyAudioDecoder] is the base class for audio stream decoders. It handles the whole path from encoded data to audio frames:
+		- incoming encoded data is stored in a fixed 128 KiB buffer (about 8 seconds at 128 kbps). If the buffer is full, the oldest bytes are dropped and [signal buffer_overrun] is emitted. This keeps playback close to live after a stall.
+		- [method process_audio] decodes the data one codec frame at a time and pushes the result into an [AudioStreamGeneratorPlayback].
+		- it tracks the buffering state and emits signals when buffering starts and finishes.
+		Decoding starts only after about one second of encoded data is buffered (see [method set_bitrate_hint]). When the codec runs out of data, the same amount is buffered again before decoding continues. The format of the first decoded frame is reported through [signal stream_info_ready]. Format changes during the stream are described there.
+		[IcyHttpStream] creates a decoder for the server's content type by itself, and [IcyRadioPlayer] does all the remaining steps, so most users do not use this class directly.
 
-		[b]Note:[/b] Derived classes only implement the codec itself (probe, decode a batch, reset); everything else is shared.
+		[b]Note:[/b] Derived classes only implement the codec (decode one frame, reset). Everything else is shared. Decoders are C++ classes; the codec methods are not available to scripts.
 	</description>
 
 	<tutorials>
@@ -34,7 +38,8 @@
 
 		<signal name="stream_info_ready">
 			<description>
-				Emitted from inside [method process_audio] (synchronously, on the main thread) once the decoder has read enough of the stream to determine its sample rate and channel count. This happens before a playback is required, so a handler can set the generator's [code]mix_rate[/code] from [method get_stream_sample_rate], start the player and then call [method set_playback] with the freshly created playback. No audio is decoded until a playback has been set.
+				Emitted from inside [method process_audio] (directly, on the main thread) after the decoder has decoded the first frame of the stream and knows its sample rate and channel count. No playback is needed yet at this point, so a handler can set the generator's [code]mix_rate[/code] from [method get_stream_sample_rate], start the player, and then call [method set_playback] with the new playback. The first frame is kept and pushed as soon as a playback is set. Nothing else is decoded until then.
+				[b]Note:[/b] The signal can be emitted more than once per stream. Some stations change the sample rate between tracks (for example when switching to a fallback source or an ad). The generator's [code]mix_rate[/code] cannot change while playing, so the decoder emits this signal again, and the handler should do the same steps with a new playback. A change between mono and stereo is handled inside the decoder and does not emit the signal.
 			</description>
 		</signal>
 
@@ -68,7 +73,7 @@
 			<param index="0" name="target_frames" type="int" />
 			<description>
 				Configures the buffering threshold used by the decoder.
-				[code]target_frames[/code] specifies the number of buffered frames required before buffering is considered complete.
+				[code]target_frames[/code] is the number of buffered frames needed before buffering is considered complete. A value larger than the playback can hold is limited to the playback's capacity (with a warning printed once), because it could never be reached.
 			</description>
 		</method>
 
@@ -91,21 +96,22 @@
 			<return type="void" />
 			<param index="0" name="kbps" type="int" />
 			<description>
-				Sets the amount of encoded data (in bytes) that must be buffered before decoding starts, and before it resumes after the codec has run out of data, to roughly one second of audio at [param kbps]. The threshold is [code]max((kbps * 1000) / 8, floor)[/code], where [code]floor[/code] is the minimum amount the codec needs to probe the stream (16384 bytes for MP3, so streams below 128 kbps all use the floor, which for them is more than one second of audio). If this method is not called, the floor is used. Non-positive values are ignored.
+				Sets how much encoded data (in bytes) must be buffered before decoding starts, and before it continues after the codec has run out of data. The amount is about one second of audio at [param kbps]: [code]max((kbps * 1000) / 8, 16384)[/code]. Streams below 128 kbps all use the minimum of 16384 bytes, which for them is more than one second. If this method is not called, the minimum is used for the first frame, and after that the bitrate reported by the codec is used (MP3 reports it). Values of [code]0[/code] or less are ignored.
+				[IcyHttpStream] calls this with the value of the server's [code]icy-br[/code] header on the decoders it creates.
 			</description>
 		</method>
 
 		<method name="get_stream_sample_rate" qualifiers="const">
 			<return type="int" />
 			<description>
-				Returns the sample rate of the incoming stream, or [code]0[/code] until [signal stream_info_ready] has been emitted.
+				Returns the sample rate of the stream, as last reported by [signal stream_info_ready], or [code]0[/code] before the signal was emitted for the first time.
 			</description>
 		</method>
 
 		<method name="get_stream_channels" qualifiers="const">
 			<return type="int" />
 			<description>
-				Returns the channel count of the incoming stream, or [code]0[/code] until [signal stream_info_ready] has been emitted.
+				Returns the channel count of the last decoded frame, or [code]0[/code] until [signal stream_info_ready] has been emitted. It can change during the stream without a signal.
 			</description>
 		</method>
 
@@ -141,7 +147,7 @@
 			<return type="IcyAudioDecoder" />
 			<param index="0" name="mime_type" type="String" />
 			<description>
-				Creates and returns a new decoder instance for [code]mime_type[/code] (e.g. [code]"audio/mpeg"[/code]) using the decoder that was registered for it, or [code]null[/code] if no decoder is registered for that MIME type. Decoders register themselves at extension init time; use this instead of hand-rolling a content-type [code]match[/code], so a future decoder module can add support for its own MIME type without callers needing to change.
+				Creates and returns a new decoder for [code]mime_type[/code] (for example [code]"audio/mpeg"[/code]), or [code]null[/code] if no decoder is registered for that MIME type. Decoders register themselves when the extension is loaded. [IcyHttpStream] uses this method to create a decoder for each connection. Scripts only need it to use a decoder without the stream.
 			</description>
 		</method>
 	</methods>
