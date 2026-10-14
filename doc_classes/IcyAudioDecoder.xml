@@ -46,7 +46,7 @@
 		<signal name="buffer_overrun">
 			<param index="0" name="dropped_bytes" type="int" />
 			<description>
-				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (128 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Usually means [method process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
+				Emitted when incoming encoded data arrives faster than it is consumed and the internal jitter buffer (128 KiB) overflows. The oldest [param dropped_bytes] bytes are discarded so playback stays near the live edge. Stations that open with a large burst of data cause this in normal use. Repeated overruns during playback mean [method process_audio] is not being called regularly. The signal is emitted deferred because the overflow is detected on the download thread.
 			</description>
 		</signal>
 

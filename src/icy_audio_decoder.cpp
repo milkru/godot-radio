@@ -4,6 +4,7 @@
 #include "godot_cpp/core/error_macros.hpp"
 #include "godot_cpp/core/math.hpp"
 #include "godot_cpp/core/object.hpp"
+#include "godot_cpp/variant/utility_functions.hpp"
 #include "godot_cpp/variant/vector2.hpp"
 #include <cstring>
 
@@ -146,8 +147,9 @@ void IcyAudioDecoder::push_encoded_data(const uint8_t *p_data, size_t p_size) {
 	}
 
 	if (dropped_bytes > 0) {
+		// verbose only: stations that open with a large burst overrun the ring in normal use
+		UtilityFunctions::print_verbose("IcyAudioDecoder: jitter buffer overrun, dropping oldest audio.");
 		// Runs on the network thread; the signal has to go through the message queue.
-		WARN_PRINT_ONCE("IcyAudioDecoder: jitter buffer overrun, dropping oldest audio. Is process_audio() being called regularly?");
 		call_deferred("emit_signal", "buffer_overrun", static_cast<int>(dropped_bytes));
 	}
 }
