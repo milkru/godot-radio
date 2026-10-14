@@ -6,11 +6,11 @@
 
 namespace godot {
 
-class IcyMetadataDemuxer {
+class MetadataDemuxer {
 public:
-	static constexpr int ICY_METADATA_BLOCK_SIZE = 16;
+	static constexpr int METADATA_BLOCK_SIZE = 16;
 	// the protocol encodes the metadata length in one byte x 16, so this is the hard upper bound
-	static constexpr int ICY_MAX_METADATA_BYTES = 255 * ICY_METADATA_BLOCK_SIZE;
+	static constexpr int MAX_METADATA_BYTES = 255 * METADATA_BLOCK_SIZE;
 
 private:
 	enum State {
@@ -24,7 +24,7 @@ private:
 	int meta_bytes_remaining = 0;
 	int metadata_len = 0;
 	State state = AUDIO;
-	uint8_t metadata_buffer[ICY_MAX_METADATA_BYTES];
+	uint8_t metadata_buffer[MAX_METADATA_BYTES];
 
 public:
 	// p_metaint <= 0 disables demuxing: feed() passes everything through as audio
@@ -59,7 +59,7 @@ public:
 				}
 			}
 			else if (state == LENGTH_BYTE) {
-				meta_bytes_remaining = p_data[offset] * ICY_METADATA_BLOCK_SIZE;
+				meta_bytes_remaining = p_data[offset] * METADATA_BLOCK_SIZE;
 				++offset;
 
 				if (meta_bytes_remaining > 0) {

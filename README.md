@@ -1,41 +1,45 @@
-<p align="center" width="100%"><img src="project/radio.svg"></p>
+# Godot Radio
 
-# IcyRadioStreamer
-
-A GDExtension plugin for receiving IceCast streams inside the Godot 4.x game engine.
+Live internet radio for Godot 4.3+, as a GDExtension. It streams MP3 stations, decodes them as they
+arrive and plays them through any Godot audio player node.
 
 ## Features
 
-* Modular architecture designed to support additional media decoders in the future
-* HTTP streaming performed on a dedicated thread
-* Lightweight implementation that can operate entirely outside the SceneTree (See `example2.gd`)
-* Compatible with any Godot audio playback node, including 2D, 3D, and non-positional audio players
-* Full in-editor documentation
+* Plays through `AudioStreamPlayer`, `AudioStreamPlayer2D` or `AudioStreamPlayer3D`
+* Downloads on its own thread, over HTTP or HTTPS
+* Reads endless streams from servers Godot's `HTTPClient` can't, including SHOUTcast `ICY 200 OK` answers
+* Follows redirects, pauses while buffering and reconnects when a station drops
+* Reports song titles from the stream metadata
+* Full in-editor class documentation
 
-## Current Support
+## Usage
 
-At present, the plugin includes an MP3 decoder implementation. Support for additional audio formats is planned.
-
-## Getting Started
-
-Add an `IcyRadioPlayer` node next to an `AudioStreamPlayer` (2D and 3D players work too), set its
-`player_path` to the player and call `play()`:
+Add a `RadioPlayer` node next to an audio player, set its `player_path` to the player and call
+`play()`:
 
 ```gdscript
-@onready var radio: IcyRadioPlayer = $IcyRadioPlayer
+@onready var radio: RadioPlayer = $RadioPlayer
 
 func _ready() -> void:
 	radio.metadata_received.connect(func(title: String): print("Now playing: ", title))
-	radio.play("http://example.com:8000/stream")
+	radio.play("https://example.com/stream.mp3")
 ```
 
-The node picks the decoder from the server's content type, sets the player's `AudioStreamGenerator`
-to the stream's sample rate, pauses while buffering and reconnects when the connection is lost. The
-classes it uses (`IcyHttpStream`, `IcyAudioDecoder`) are public and can be used on their own.
+`stream_failed` reports why a station stopped. The classes behind the node, `RadioStream` and
+`RadioDecoder`, are public and work on their own too. The examples in `project/addons/` show both
+ways.
 
-The full example is in `project/addons/icy-radio-streamer/example.gd`. `example2.gd` in the same
-folder builds the same radio from `IcyHttpStream` and `IcyAudioDecoder` directly, without the node.
+## Building
 
-## Overview
+Clone with submodules, then build from the repository root:
 
-IcyRadioStreamer downloads and decodes IceCast audio streams and exposes the resulting raw audio data for playback through Godot's default audio system, allowing you to route streamed audio to any suitable audio player node.
+```
+scons platform=windows target=template_debug
+scons platform=windows target=template_release
+```
+
+The libraries land in the addon's `bin/` folder under `project/addons/`.
+
+## License
+
+MIT, see `LICENSE.md`.

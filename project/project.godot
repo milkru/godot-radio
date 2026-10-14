@@ -10,6 +10,6 @@ config_version=5
 
 [application]
 
-config/name="icy radio streamer example"
+config/name="godot radio example"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://radio.svg"

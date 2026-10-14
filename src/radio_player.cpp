@@ -1,4 +1,4 @@
-#include "icy_radio_player.hpp"
+#include "radio_player.hpp"
 #include "home_country.hpp"
 #include "godot_cpp/classes/audio_stream_generator_playback.hpp"
 #include "godot_cpp/core/class_db.hpp"
@@ -9,27 +9,27 @@
 
 using namespace godot;
 
-void IcyRadioPlayer::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("play", "url", "custom_headers"), &IcyRadioPlayer::play, DEFVAL(PackedStringArray()));
-	ClassDB::bind_method(D_METHOD("stop"), &IcyRadioPlayer::stop);
-	ClassDB::bind_static_method("IcyRadioPlayer", D_METHOD("get_home_country"), &IcyRadioPlayer::get_home_country);
-	ClassDB::bind_method(D_METHOD("get_state"), &IcyRadioPlayer::get_state);
-	ClassDB::bind_method(D_METHOD("get_stream"), &IcyRadioPlayer::get_stream);
-	ClassDB::bind_method(D_METHOD("get_http_stream"), &IcyRadioPlayer::get_http_stream);
-	ClassDB::bind_method(D_METHOD("get_audio_decoder"), &IcyRadioPlayer::get_audio_decoder);
+void RadioPlayer::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("play", "url", "custom_headers"), &RadioPlayer::play, DEFVAL(PackedStringArray()));
+	ClassDB::bind_method(D_METHOD("stop"), &RadioPlayer::stop);
+	ClassDB::bind_static_method("RadioPlayer", D_METHOD("get_home_country"), &RadioPlayer::get_home_country);
+	ClassDB::bind_method(D_METHOD("get_state"), &RadioPlayer::get_state);
+	ClassDB::bind_method(D_METHOD("get_stream"), &RadioPlayer::get_stream);
+	ClassDB::bind_method(D_METHOD("get_http_stream"), &RadioPlayer::get_http_stream);
+	ClassDB::bind_method(D_METHOD("get_audio_decoder"), &RadioPlayer::get_audio_decoder);
 
-	ClassDB::bind_method(D_METHOD("set_player_path", "path"), &IcyRadioPlayer::set_player_path);
-	ClassDB::bind_method(D_METHOD("get_player_path"), &IcyRadioPlayer::get_player_path);
-	ClassDB::bind_method(D_METHOD("set_target_buffer", "seconds"), &IcyRadioPlayer::set_target_buffer);
-	ClassDB::bind_method(D_METHOD("get_target_buffer"), &IcyRadioPlayer::get_target_buffer);
-	ClassDB::bind_method(D_METHOD("set_reconnect_delay", "seconds"), &IcyRadioPlayer::set_reconnect_delay);
-	ClassDB::bind_method(D_METHOD("get_reconnect_delay"), &IcyRadioPlayer::get_reconnect_delay);
-	ClassDB::bind_method(D_METHOD("set_connect_timeout", "seconds"), &IcyRadioPlayer::set_connect_timeout);
-	ClassDB::bind_method(D_METHOD("get_connect_timeout"), &IcyRadioPlayer::get_connect_timeout);
-	ClassDB::bind_method(D_METHOD("set_stall_timeout", "seconds"), &IcyRadioPlayer::set_stall_timeout);
-	ClassDB::bind_method(D_METHOD("get_stall_timeout"), &IcyRadioPlayer::get_stall_timeout);
-	ClassDB::bind_method(D_METHOD("set_parse_metadata", "enabled"), &IcyRadioPlayer::set_parse_metadata);
-	ClassDB::bind_method(D_METHOD("get_parse_metadata"), &IcyRadioPlayer::get_parse_metadata);
+	ClassDB::bind_method(D_METHOD("set_player_path", "path"), &RadioPlayer::set_player_path);
+	ClassDB::bind_method(D_METHOD("get_player_path"), &RadioPlayer::get_player_path);
+	ClassDB::bind_method(D_METHOD("set_target_buffer", "seconds"), &RadioPlayer::set_target_buffer);
+	ClassDB::bind_method(D_METHOD("get_target_buffer"), &RadioPlayer::get_target_buffer);
+	ClassDB::bind_method(D_METHOD("set_reconnect_delay", "seconds"), &RadioPlayer::set_reconnect_delay);
+	ClassDB::bind_method(D_METHOD("get_reconnect_delay"), &RadioPlayer::get_reconnect_delay);
+	ClassDB::bind_method(D_METHOD("set_connect_timeout", "seconds"), &RadioPlayer::set_connect_timeout);
+	ClassDB::bind_method(D_METHOD("get_connect_timeout"), &RadioPlayer::get_connect_timeout);
+	ClassDB::bind_method(D_METHOD("set_stall_timeout", "seconds"), &RadioPlayer::set_stall_timeout);
+	ClassDB::bind_method(D_METHOD("get_stall_timeout"), &RadioPlayer::get_stall_timeout);
+	ClassDB::bind_method(D_METHOD("set_parse_metadata", "enabled"), &RadioPlayer::set_parse_metadata);
+	ClassDB::bind_method(D_METHOD("get_parse_metadata"), &RadioPlayer::get_parse_metadata);
 
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "player_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "AudioStreamPlayer,AudioStreamPlayer2D,AudioStreamPlayer3D"), "set_player_path", "get_player_path");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_buffer", PROPERTY_HINT_RANGE, "0.05,5,0.05,or_greater,suffix:s"), "set_target_buffer", "get_target_buffer");
@@ -38,9 +38,9 @@ void IcyRadioPlayer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "stall_timeout", PROPERTY_HINT_RANGE, "0,60,0.1,or_greater,suffix:s"), "set_stall_timeout", "get_stall_timeout");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "parse_metadata"), "set_parse_metadata", "get_parse_metadata");
 
-	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_CLASS_IS_ENUM, "IcyRadioPlayer.State")));
+	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_CLASS_IS_ENUM, "RadioPlayer.State")));
 	ADD_SIGNAL(MethodInfo("metadata_received", PropertyInfo(Variant::STRING, "title")));
-	ADD_SIGNAL(MethodInfo("stream_failed", PropertyInfo(Variant::INT, "result", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_CLASS_IS_ENUM, "IcyHttpStream.Result"), PropertyInfo(Variant::INT, "http_code")));
+	ADD_SIGNAL(MethodInfo("stream_failed", PropertyInfo(Variant::INT, "result", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_CLASS_IS_ENUM, "RadioStream.Result"), PropertyInfo(Variant::INT, "http_code")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_CONNECTING);
@@ -50,18 +50,18 @@ void IcyRadioPlayer::_bind_methods() {
 	BIND_ENUM_CONSTANT(STATE_FAILED);
 }
 
-IcyRadioPlayer::IcyRadioPlayer() {
+RadioPlayer::RadioPlayer() {
 	http_stream.instantiate();
-	http_stream->connect("connection_opened", callable_mp(this, &IcyRadioPlayer::_on_connection_opened));
-	http_stream->connect("connection_closed", callable_mp(this, &IcyRadioPlayer::_on_connection_closed));
-	http_stream->connect("metadata_received", callable_mp(this, &IcyRadioPlayer::_on_metadata_received));
+	http_stream->connect("connection_opened", callable_mp(this, &RadioPlayer::_on_connection_opened));
+	http_stream->connect("connection_closed", callable_mp(this, &RadioPlayer::_on_connection_closed));
+	http_stream->connect("metadata_received", callable_mp(this, &RadioPlayer::_on_metadata_received));
 }
 
-void IcyRadioPlayer::_ready() {
+void RadioPlayer::_ready() {
 	set_process(true);
 }
 
-void IcyRadioPlayer::_process(double p_delta) {
+void RadioPlayer::_process(double p_delta) {
 	if (state == STATE_RECONNECTING) {
 		reconnect_countdown -= p_delta;
 		if (reconnect_countdown <= 0.0) {
@@ -75,13 +75,13 @@ void IcyRadioPlayer::_process(double p_delta) {
 	}
 }
 
-void IcyRadioPlayer::_exit_tree() {
+void RadioPlayer::_exit_tree() {
 	stop();
 }
 
-Error IcyRadioPlayer::play(const String &p_url, const PackedStringArray &p_custom_headers) {
+Error RadioPlayer::play(const String &p_url, const PackedStringArray &p_custom_headers) {
 	Node *player = _get_player();
-	ERR_FAIL_NULL_V_MSG(player, ERR_UNCONFIGURED, "IcyRadioPlayer: player_path must point to an AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D.");
+	ERR_FAIL_NULL_V_MSG(player, ERR_UNCONFIGURED, "RadioPlayer: player_path must point to an AudioStreamPlayer, AudioStreamPlayer2D or AudioStreamPlayer3D.");
 
 	stop();
 
@@ -101,13 +101,13 @@ Error IcyRadioPlayer::play(const String &p_url, const PackedStringArray &p_custo
 	return _start_request();
 }
 
-String IcyRadioPlayer::get_home_country() {
+String RadioPlayer::get_home_country() {
 	char code[3];
 	get_home_country_code(code);
 	return String(code);
 }
 
-void IcyRadioPlayer::stop() {
+void RadioPlayer::stop() {
 	// cancel_request() reports RESULT_CANCELLED through connection_closed, which _on_connection_closed ignores
 	http_stream->cancel_request();
 	Node *player = _get_player();
@@ -118,7 +118,7 @@ void IcyRadioPlayer::stop() {
 	_set_state(STATE_IDLE);
 }
 
-Error IcyRadioPlayer::_start_request() {
+Error RadioPlayer::_start_request() {
 	_detach_decoder();
 	const Error err = http_stream->request(url, connect_timeout, parse_metadata, custom_headers);
 	if (err != OK) {
@@ -129,7 +129,7 @@ Error IcyRadioPlayer::_start_request() {
 	return OK;
 }
 
-Node *IcyRadioPlayer::_get_player() const {
+Node *RadioPlayer::_get_player() const {
 	Node *node = get_node_or_null(player_path);
 	if (node == nullptr || !node->has_method("get_stream_playback")) {
 		return nullptr;
@@ -137,22 +137,22 @@ Node *IcyRadioPlayer::_get_player() const {
 	return node;
 }
 
-void IcyRadioPlayer::_set_state(State p_state) {
+void RadioPlayer::_set_state(State p_state) {
 	if (state == p_state) { return; }
 	state = p_state;
 	emit_signal("state_changed", state);
 }
 
-void IcyRadioPlayer::_detach_decoder() {
+void RadioPlayer::_detach_decoder() {
 	if (decoder.is_null()) { return; }
-	decoder->disconnect("stream_info_ready", callable_mp(this, &IcyRadioPlayer::_on_stream_info_ready));
-	decoder->disconnect("buffering_started", callable_mp(this, &IcyRadioPlayer::_on_buffering_started));
-	decoder->disconnect("buffering_finished", callable_mp(this, &IcyRadioPlayer::_on_buffering_finished));
-	decoder->disconnect("stream_error", callable_mp(this, &IcyRadioPlayer::_on_stream_error));
+	decoder->disconnect("stream_info_ready", callable_mp(this, &RadioPlayer::_on_stream_info_ready));
+	decoder->disconnect("buffering_started", callable_mp(this, &RadioPlayer::_on_buffering_started));
+	decoder->disconnect("buffering_finished", callable_mp(this, &RadioPlayer::_on_buffering_finished));
+	decoder->disconnect("stream_error", callable_mp(this, &RadioPlayer::_on_stream_error));
 	decoder.unref();
 }
 
-void IcyRadioPlayer::_fail(IcyHttpStream::Result p_result) {
+void RadioPlayer::_fail(RadioStream::Result p_result) {
 	Node *player = _get_player();
 	if (player != nullptr) {
 		player->call("stop");
@@ -162,23 +162,23 @@ void IcyRadioPlayer::_fail(IcyHttpStream::Result p_result) {
 	emit_signal("stream_failed", p_result, http_stream->get_response_code());
 }
 
-void IcyRadioPlayer::_on_connection_opened() {
+void RadioPlayer::_on_connection_opened() {
 	// the stream created the decoder for the response's content type before the first body byte arrived
 	_detach_decoder();
 	decoder = http_stream->get_audio_decoder();
-	ERR_FAIL_COND_MSG(decoder.is_null(), "IcyRadioPlayer: the stream opened without a decoder.");
+	ERR_FAIL_COND_MSG(decoder.is_null(), "RadioPlayer: the stream opened without a decoder.");
 
-	decoder->connect("stream_info_ready", callable_mp(this, &IcyRadioPlayer::_on_stream_info_ready));
-	decoder->connect("buffering_started", callable_mp(this, &IcyRadioPlayer::_on_buffering_started));
-	decoder->connect("buffering_finished", callable_mp(this, &IcyRadioPlayer::_on_buffering_finished));
-	decoder->connect("stream_error", callable_mp(this, &IcyRadioPlayer::_on_stream_error));
+	decoder->connect("stream_info_ready", callable_mp(this, &RadioPlayer::_on_stream_info_ready));
+	decoder->connect("buffering_started", callable_mp(this, &RadioPlayer::_on_buffering_started));
+	decoder->connect("buffering_finished", callable_mp(this, &RadioPlayer::_on_buffering_finished));
+	decoder->connect("stream_error", callable_mp(this, &RadioPlayer::_on_stream_error));
 	_set_state(STATE_BUFFERING);
 }
 
-void IcyRadioPlayer::_on_connection_closed(int p_result) {
+void RadioPlayer::_on_connection_closed(int p_result) {
 	// stop() and _on_stream_error() have already put the node in the state they wanted; the signal is deferred,
 	// so a result from a connection that was cancelled in the meantime can also still arrive here
-	if (p_result == IcyHttpStream::RESULT_CANCELLED || state == STATE_IDLE || state == STATE_FAILED) { return; }
+	if (p_result == RadioStream::RESULT_CANCELLED || state == STATE_IDLE || state == STATE_FAILED) { return; }
 
 	Node *player = _get_player();
 	if (player != nullptr) {
@@ -187,7 +187,7 @@ void IcyRadioPlayer::_on_connection_closed(int p_result) {
 	_detach_decoder();
 
 	// the state is settled before the signal so a handler that calls play() again is not overridden
-	if (p_result == IcyHttpStream::RESULT_UNSUPPORTED_FORMAT || reconnect_delay <= 0.0) {
+	if (p_result == RadioStream::RESULT_UNSUPPORTED_FORMAT || reconnect_delay <= 0.0) {
 		_set_state(STATE_FAILED);
 	} else {
 		reconnect_countdown = reconnect_delay;
@@ -209,15 +209,15 @@ static String extract_stream_title(const String &p_metadata) {
 	return p_metadata.substr(start, end - start);
 }
 
-void IcyRadioPlayer::_on_metadata_received(const String &p_metadata) {
+void RadioPlayer::_on_metadata_received(const String &p_metadata) {
 	emit_signal("metadata_received", extract_stream_title(p_metadata));
 }
 
 // the startup sequence every consumer used to reproduce by hand. Also runs again when the station changes
 // sample rate mid-stream: play() then replaces the playback with one sized for the new mix_rate
-void IcyRadioPlayer::_on_stream_info_ready() {
+void RadioPlayer::_on_stream_info_ready() {
 	Node *player = _get_player();
-	ERR_FAIL_NULL_MSG(player, "IcyRadioPlayer: the player node went away while streaming.");
+	ERR_FAIL_NULL_MSG(player, "RadioPlayer: the player node went away while streaming.");
 
 	stream->set_mix_rate(static_cast<float>(decoder->get_stream_sample_rate()));
 
@@ -230,14 +230,14 @@ void IcyRadioPlayer::_on_stream_info_ready() {
 	player->set("stream_paused", true);
 
 	Ref<AudioStreamGeneratorPlayback> playback = player->call("get_stream_playback");
-	ERR_FAIL_COND_MSG(playback.is_null(), "IcyRadioPlayer: the player did not produce an AudioStreamGeneratorPlayback. Is its stream an AudioStreamGenerator?");
+	ERR_FAIL_COND_MSG(playback.is_null(), "RadioPlayer: the player did not produce an AudioStreamGeneratorPlayback. Is its stream an AudioStreamGenerator?");
 
 	decoder->set_playback(playback);
 	decoder->set_buffer_thresholds(static_cast<int>(stream->get_mix_rate() * target_buffer));
 	_set_state(STATE_BUFFERING);
 }
 
-void IcyRadioPlayer::_on_buffering_started() {
+void RadioPlayer::_on_buffering_started() {
 	Node *player = _get_player();
 	if (player != nullptr) {
 		player->set("stream_paused", true);
@@ -245,7 +245,7 @@ void IcyRadioPlayer::_on_buffering_started() {
 	_set_state(STATE_BUFFERING);
 }
 
-void IcyRadioPlayer::_on_buffering_finished() {
+void RadioPlayer::_on_buffering_finished() {
 	Node *player = _get_player();
 	if (player != nullptr) {
 		player->set("stream_paused", false);
@@ -253,72 +253,72 @@ void IcyRadioPlayer::_on_buffering_finished() {
 	_set_state(STATE_PLAYING);
 }
 
-void IcyRadioPlayer::_on_stream_error(const String &p_message) {
+void RadioPlayer::_on_stream_error(const String &p_message) {
 	// the decoder cannot make sense of the data (mislabelled content type); reconnecting would not help
 	http_stream->cancel_request();
-	_fail(IcyHttpStream::RESULT_UNSUPPORTED_FORMAT);
+	_fail(RadioStream::RESULT_UNSUPPORTED_FORMAT);
 }
 
-IcyRadioPlayer::State IcyRadioPlayer::get_state() const {
+RadioPlayer::State RadioPlayer::get_state() const {
 	return state;
 }
 
-Ref<AudioStreamGenerator> IcyRadioPlayer::get_stream() const {
+Ref<AudioStreamGenerator> RadioPlayer::get_stream() const {
 	return stream;
 }
 
-Ref<IcyHttpStream> IcyRadioPlayer::get_http_stream() const {
+Ref<RadioStream> RadioPlayer::get_http_stream() const {
 	return http_stream;
 }
 
-Ref<IcyAudioDecoder> IcyRadioPlayer::get_audio_decoder() const {
+Ref<RadioDecoder> RadioPlayer::get_audio_decoder() const {
 	return decoder;
 }
 
-void IcyRadioPlayer::set_player_path(const NodePath &p_path) {
+void RadioPlayer::set_player_path(const NodePath &p_path) {
 	player_path = p_path;
 }
 
-NodePath IcyRadioPlayer::get_player_path() const {
+NodePath RadioPlayer::get_player_path() const {
 	return player_path;
 }
 
-void IcyRadioPlayer::set_target_buffer(double p_seconds) {
+void RadioPlayer::set_target_buffer(double p_seconds) {
 	target_buffer = MAX(p_seconds, 0.0);
 }
 
-double IcyRadioPlayer::get_target_buffer() const {
+double RadioPlayer::get_target_buffer() const {
 	return target_buffer;
 }
 
-void IcyRadioPlayer::set_reconnect_delay(double p_seconds) {
+void RadioPlayer::set_reconnect_delay(double p_seconds) {
 	reconnect_delay = MAX(p_seconds, 0.0);
 }
 
-double IcyRadioPlayer::get_reconnect_delay() const {
+double RadioPlayer::get_reconnect_delay() const {
 	return reconnect_delay;
 }
 
-void IcyRadioPlayer::set_connect_timeout(double p_seconds) {
+void RadioPlayer::set_connect_timeout(double p_seconds) {
 	connect_timeout = MAX(p_seconds, 0.0);
 }
 
-double IcyRadioPlayer::get_connect_timeout() const {
+double RadioPlayer::get_connect_timeout() const {
 	return connect_timeout;
 }
 
-void IcyRadioPlayer::set_stall_timeout(double p_seconds) {
+void RadioPlayer::set_stall_timeout(double p_seconds) {
 	http_stream->set_stall_timeout(static_cast<real_t>(p_seconds));
 }
 
-double IcyRadioPlayer::get_stall_timeout() const {
+double RadioPlayer::get_stall_timeout() const {
 	return http_stream->get_stall_timeout();
 }
 
-void IcyRadioPlayer::set_parse_metadata(bool p_enabled) {
+void RadioPlayer::set_parse_metadata(bool p_enabled) {
 	parse_metadata = p_enabled;
 }
 
-bool IcyRadioPlayer::get_parse_metadata() const {
+bool RadioPlayer::get_parse_metadata() const {
 	return parse_metadata;
 }

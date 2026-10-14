@@ -1,4 +1,4 @@
-#include "icy_mp3_audio_decoder.hpp"
+#include "radio_mp3_decoder.hpp"
 #include "godot_cpp/core/error_macros.hpp"
 #include "godot_cpp/core/memory.hpp"
 #include <cstring>
@@ -10,22 +10,22 @@
 
 using namespace godot;
 
-IcyMp3AudioDecoder::IcyMp3AudioDecoder() {
+RadioMp3Decoder::RadioMp3Decoder() {
 	drmp3dec_init(&dec);
 }
 
-Ref<IcyAudioDecoder> IcyMp3AudioDecoder::create_instance() {
-	return memnew(IcyMp3AudioDecoder);
+Ref<RadioDecoder> RadioMp3Decoder::create_instance() {
+	return memnew(RadioMp3Decoder);
 }
 
-void IcyMp3AudioDecoder::_bind_methods() {
+void RadioMp3Decoder::_bind_methods() {
 }
 
 // one MP3 frame per call (<= 1152 PCM frames). drmp3dec_decode_frame() reports in frame_bytes how much input it
 // consumed: a decoded frame, or junk it skipped while resyncing (frames == 0), in which case it is called again
-IcyAudioDecoder::DecodedBatch IcyMp3AudioDecoder::_decode_frames(float *r_interleaved, int p_max_frames) {
+RadioDecoder::DecodedBatch RadioMp3Decoder::_decode_frames(float *r_interleaved, int p_max_frames) {
 	DecodedBatch batch;
-	ERR_FAIL_COND_V_MSG(p_max_frames < DRMP3_MAX_PCM_FRAMES_PER_MP3_FRAME, batch, "IcyMp3AudioDecoder: batch buffer smaller than one MP3 frame");
+	ERR_FAIL_COND_V_MSG(p_max_frames < DRMP3_MAX_PCM_FRAMES_PER_MP3_FRAME, batch, "RadioMp3Decoder: batch buffer smaller than one MP3 frame");
 
 	while (true) {
 		staged += static_cast<int>(read_encoded(staging + staged, static_cast<size_t>(STAGING_CAPACITY - staged)));
@@ -48,7 +48,7 @@ IcyAudioDecoder::DecodedBatch IcyMp3AudioDecoder::_decode_frames(float *r_interl
 	}
 }
 
-void IcyMp3AudioDecoder::_reset_codec() {
+void RadioMp3Decoder::_reset_codec() {
 	drmp3dec_init(&dec);
 	staged = 0;
 }

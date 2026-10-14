@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class
+	name="RadioMp3Decoder"
+	inherits="RadioDecoder"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
+>
+	<brief_description>
+		Audio decoder implementation for MP3 streams.
+	</brief_description>
+
+	<description>
+		[RadioMp3Decoder] implements live decoding of MP3 streams. It is registered with [method RadioDecoder.create_for_mime_type] under [code]audio/mpeg[/code], [code]audio/mp3[/code], [code]audio/x-mpeg[/code] and [code]audio/mpeg3[/code].
+		Buffering, the bitrate hint, stream information and all signals are provided by [RadioDecoder]. This class only contains the codec (the low-level decoder of dr_mp3, which is minimp3). It decodes one MP3 frame per call and reports the channel count, sample rate and bitrate of every frame. Xing/Info tags at the start of a relayed file and format changes during the stream are handled like any other frame.
+	</description>
+
+	<tutorials>
+	</tutorials>
+</class>

@@ -1,14 +1,14 @@
 #pragma once
 
 #include "godot_cpp/classes/ref.hpp"
-#include "icy_audio_decoder.hpp"
+#include "radio_decoder.hpp"
 #include "thirdparty/dr_mp3.h"
 #include <cstdint>
 
 namespace godot {
 
-class IcyMp3AudioDecoder : public IcyAudioDecoder {
-	GDCLASS(IcyMp3AudioDecoder, IcyAudioDecoder);
+class RadioMp3Decoder : public RadioDecoder {
+	GDCLASS(RadioMp3Decoder, RadioDecoder);
 
 private:
 	static constexpr int MP3_HEADER_BYTES = 4;
@@ -30,9 +30,9 @@ protected:
 	void _reset_codec() override;
 
 public:
-	IcyMp3AudioDecoder();
+	RadioMp3Decoder();
 
-	static Ref<IcyAudioDecoder> create_instance();
+	static Ref<RadioDecoder> create_instance();
 };
 
 } //namespace godot

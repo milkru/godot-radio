@@ -1,6 +1,6 @@
 [gd_scene load_steps=3 format=3 uid="uid://dh0oj81pufivs"]
 
-[ext_resource type="Script" uid="uid://bkwk40ybs8kgm" path="res://addons/icy-radio-streamer/example.gd" id="1_jdh55"]
+[ext_resource type="Script" uid="uid://bkwk40ybs8kgm" path="res://addons/godot-radio/example.gd" id="1_jdh55"]
 
 [sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_2jas5"]
 buffer_length = 2.0
@@ -11,5 +11,5 @@ script = ExtResource("1_jdh55")
 [node name="Radio" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_2jas5")
 
-[node name="IcyRadioPlayer" type="IcyRadioPlayer" parent="."]
+[node name="RadioPlayer" type="RadioPlayer" parent="."]
 player_path = NodePath("../Radio")

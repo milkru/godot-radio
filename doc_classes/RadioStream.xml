@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class
-	name="IcyHttpStream"
+	name="RadioStream"
 	inherits="RefCounted"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
@@ -10,10 +10,10 @@
 	</brief_description>
 
 	<description>
-		[IcyHttpStream] establishes HTTP connections to Icecast-compatible servers and continuously downloads streaming audio data on a dedicated thread.
-		After the response headers are received, the stream creates an [IcyAudioDecoder] for the [code]Content-Type[/code] header (see [method IcyAudioDecoder.create_for_mime_type]), sets the bitrate from the [code]icy-br[/code] header on it, and sends all downloaded data to it. Get the decoder with [method get_audio_decoder] in the [signal connection_opened] handler. If no decoder is registered for the content type, the connection is closed with [constant RESULT_UNSUPPORTED_FORMAT]. If a decoder was set with [method set_audio_decoder], that one is used instead.
-		SHOUTcast v1 servers answer with an [code]ICY 200 OK[/code] line instead of an HTTP status line. These are accepted, and the ICY status code is returned by [method get_response_code] like an HTTP code.
-		The class can also parse ICY metadata embedded in the stream, and emits signals for connection changes and metadata. [IcyRadioPlayer] combines this class with a player node for the common case.
+		[RadioStream] establishes HTTP connections to Icecast-compatible servers and continuously downloads streaming audio data on a dedicated thread.
+		After the response headers are received, the stream creates a [RadioDecoder] for the [code]Content-Type[/code] header (see [method RadioDecoder.create_for_mime_type]), sets the bitrate from the [code]icy-br[/code] header on it, and sends all downloaded data to it. Get the decoder with [method get_audio_decoder] in the [signal connection_opened] handler. If no decoder is registered for the content type, the connection is closed with [constant RESULT_UNSUPPORTED_FORMAT]. If a decoder was set with [method set_audio_decoder], that one is used instead.
+		SHOUTcast v1 servers answer with an [code]ICY 200 OK[/code] line instead of an HTTP status line. These are accepted, and that status code is returned by [method get_response_code] like an HTTP code.
+		The class can also parse metadata embedded in the stream, and emits signals for connection changes and metadata. [RadioPlayer] combines this class with a player node for the common case.
 	</description>
 
 	<tutorials>
@@ -27,7 +27,7 @@
 		</signal>
 
 		<signal name="connection_closed">
-			<param index="0" name="result" type="int" enum="IcyHttpStream.Result" />
+			<param index="0" name="result" type="int" enum="RadioStream.Result" />
 			<description>
 				Emitted when the connection is closed, either intentionally or due to an error. [param result] contains a [enum Result] value describing the reason the connection was closed.
 				[b]Note:[/b] This can fire before [signal connection_opened] (e.g. [constant RESULT_CANT_CONNECT] or a non-2xx status), so handlers must not assume a decoder has been created yet.
@@ -37,7 +37,7 @@
 		<signal name="metadata_received">
 			<param index="0" name="metadata" type="String" />
 			<description>
-				Emitted when ICY metadata is received from the server. The format and contents of [param metadata] depend on the metadata provided by the stream (typically [code]StreamTitle='Artist - Title';[/code]).
+				Emitted when stream metadata is received from the server. The format and contents of [param metadata] depend on the metadata provided by the stream (typically [code]StreamTitle='Artist - Title';[/code]).
 			</description>
 		</signal>
 	</signals>
@@ -62,7 +62,7 @@
 				Returns [constant OK] if the request was started, [constant ERR_INVALID_PARAMETER] if [param url] is malformed (missing or unsupported scheme; only [code]http://[/code] and [code]https://[/code] are accepted), or [constant ERR_BUSY] if a request is already active. Connection failures that happen after this call returns are reported asynchronously through [signal connection_closed].
 				[param url] specifies the URL of the Icecast stream.
 				[param connect_timeout] is how many seconds the stream waits for the response headers before it gives up with [constant RESULT_TIMEOUT]. This covers name resolution, connecting, the TLS handshake, the request and any redirects. [code]0[/code] disables it. After the headers are received, [member stall_timeout] is used instead.
-				If [param parse_metadata] is [code]true[/code], ICY metadata embedded in the stream is parsed and exposed through the appropriate signals.
+				If [param parse_metadata] is [code]true[/code], metadata embedded in the stream is parsed and exposed through the appropriate signals.
 				[param custom_headers] specifies additional HTTP headers to include in the request such as user agent or bearer token. Each entry must be formatted as [code]"Header-Name: Value"[/code].
 			</description>
 		</method>
@@ -101,7 +101,7 @@
 		</method>
 
 		<method name="get_audio_decoder" qualifiers="const">
-			<return type="IcyAudioDecoder" />
+			<return type="RadioDecoder" />
 
 			<description>
 				Returns the decoder that receives the data of the current connection: either the one the stream created for the content type, or the one set with [method set_audio_decoder]. Available from the [signal connection_opened] handler on. [code]null[/code] before the first connection is open.
@@ -135,7 +135,7 @@
 		<method name="set_audio_decoder">
 			<return type="void" />
 
-			<param index="0" name="audio_decoder" type="IcyAudioDecoder" />
+			<param index="0" name="audio_decoder" type="RadioDecoder" />
 
 			<description>
 				Sets the decoder that receives the downloaded data, instead of letting the stream create one for each connection from the content type. Call it before [method request]. The same decoder is then used for every connection until it is replaced, and the stream does not set [code]icy-br[/code] on it. Pass [code]null[/code] to let the stream create decoders again. Data is pushed into the decoder directly from the download thread, not through the main thread.
@@ -166,7 +166,7 @@
 			The response headers did not arrive within the [code]connect_timeout[/code] passed to [method request], or no data arrived for longer than [member stall_timeout].
 		</constant>
 		<constant name="RESULT_REQUEST_FAILED" value="5" enum="Result">
-			The server closed the connection before its response headers were complete, or returned a non-2xx status code (HTTP or ICY). Use [method get_response_code] to inspect the status.
+			The server closed the connection before its response headers were complete, or returned a non-2xx status code (HTTP or SHOUTcast). Use [method get_response_code] to inspect the status.
 		</constant>
 		<constant name="RESULT_REDIRECT_LIMIT_REACHED" value="6" enum="Result">
 			The server redirected more times than allowed.

@@ -1,5 +1,5 @@
 # addon
-project/addons/icy-radio-streamer/bin/
+project/addons/godot-radio/bin/
 src/*.obj
 
 # Godot-cpp

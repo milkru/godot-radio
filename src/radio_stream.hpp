@@ -14,15 +14,15 @@
 #include "godot_cpp/variant/packed_byte_array.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
 #include "godot_cpp/variant/string.hpp"
-#include "icy_audio_decoder.hpp"
-#include "icy_metadata_demuxer.hpp"
+#include "metadata_demuxer.hpp"
+#include "radio_decoder.hpp"
 #include <cstdint>
 #include <mutex>
 
 namespace godot {
 
-class IcyHttpStream : public RefCounted {
-	GDCLASS(IcyHttpStream, RefCounted);
+class RadioStream : public RefCounted {
+	GDCLASS(RadioStream, RefCounted);
 
 public:
 	enum Result {
@@ -80,7 +80,7 @@ private:
 	Ref<Thread> thread;
 	// guarded by decoder_mutex. The stream creates the decoder itself from the content type unless the caller
 	// supplied one through set_audio_decoder()
-	Ref<IcyAudioDecoder> audio_decoder;
+	Ref<RadioDecoder> audio_decoder;
 	bool is_decoder_user_supplied = false;
 
 	// guarded by response_state_mutex; read by the public getters on the main thread
@@ -100,7 +100,7 @@ private:
 	String request_string;
 	String url;
 	PackedStringArray request_headers;
-	IcyMetadataDemuxer icy_demuxer;
+	MetadataDemuxer metadata_demuxer;
 
 	// the connect timeout applies until the response headers are in (redirects included), then the stall timeout
 	// takes over and is restarted by every body chunk; 0 disables the one it is copied into
@@ -113,7 +113,7 @@ private:
 	int64_t body_left = -1;
 	int port = 0;
 	bool use_tls = false;
-	bool parse_icy_metadata = false;
+	bool parse_stream_metadata = false;
 	bool request_sent = false;
 
 	// all of these run on the worker thread. Signals are routed through the message queue;
@@ -146,14 +146,14 @@ private:
 
 	static ParsedUrl _parse_url(const String &p_url);
 	void _apply_parsed_url(const ParsedUrl &p_parsed);
-	void _reset_icy_state();
+	void _reset_metadata_state();
 
 protected:
 	static void _bind_methods();
 
 public:
-	IcyHttpStream();
-	~IcyHttpStream();
+	RadioStream();
+	~RadioStream();
 
 	Error request(const String &p_url, real_t p_connect_timeout = DEFAULT_CONNECT_TIMEOUT, bool p_parse_metadata = false, const PackedStringArray &p_custom_headers = PackedStringArray());
 	void cancel_request();
@@ -165,9 +165,9 @@ public:
 	int get_response_code() const;
 	// optional: a decoder supplied here (before request()) is used as is, for every connection, and the stream
 	// does not apply icy-br to it. Pass null to go back to letting the stream create one per connection
-	void set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder);
+	void set_audio_decoder(const Ref<RadioDecoder> p_decoder);
 	// the decoder receiving this connection's data; created by the time connection_opened is emitted
-	Ref<IcyAudioDecoder> get_audio_decoder() const;
+	Ref<RadioDecoder> get_audio_decoder() const;
 	PackedStringArray get_response_headers() const;
 	Dictionary get_response_headers_as_dictionary() const;
 	int get_downloaded_bytes() const;
@@ -175,4 +175,4 @@ public:
 
 } //namespace godot
 
-VARIANT_ENUM_CAST(IcyHttpStream::Result);
+VARIANT_ENUM_CAST(RadioStream::Result);

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class
-	name="IcyRadioPlayer"
+	name="RadioPlayer"
 	inherits="Node"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
@@ -10,9 +10,9 @@
 	</brief_description>
 
 	<description>
-		[IcyRadioPlayer] is the simplest way to use the addon. Set [member player_path] to an [AudioStreamPlayer], [AudioStreamPlayer2D] or [AudioStreamPlayer3D], call [method play], and the node does the rest:
-		- it opens the connection with its own [IcyHttpStream],
-		- it uses the [IcyAudioDecoder] that the stream creates for the server's content type,
+		[RadioPlayer] is the simplest way to use the addon. Set [member player_path] to an [AudioStreamPlayer], [AudioStreamPlayer2D] or [AudioStreamPlayer3D], call [method play], and the node does the rest:
+		- it opens the connection with its own [RadioStream],
+		- it uses the [RadioDecoder] that the stream creates for the server's content type,
 		- it sets the player's [AudioStreamGenerator] to the stream's sample rate and starts the player,
 		- it feeds the decoder from [method Node._process],
 		- it pauses the player while buffering, and
@@ -27,7 +27,7 @@
 
 	<signals>
 		<signal name="state_changed">
-			<param index="0" name="state" type="int" enum="IcyRadioPlayer.State" />
+			<param index="0" name="state" type="int" enum="RadioPlayer.State" />
 			<description>
 				Emitted every time [method get_state] changes.
 			</description>
@@ -36,15 +36,15 @@
 		<signal name="metadata_received">
 			<param index="0" name="title" type="String" />
 			<description>
-				Emitted when the server sends ICY metadata (needs [member parse_metadata]). [param title] is the value of [code]StreamTitle[/code], usually [code]Artist - Title[/code]. If the metadata has no [code]StreamTitle[/code], the raw metadata string is passed instead.
+				Emitted when the server sends stream metadata (needs [member parse_metadata]). [param title] is the value of [code]StreamTitle[/code], usually [code]Artist - Title[/code]. If the metadata has no [code]StreamTitle[/code], the raw metadata string is passed instead.
 			</description>
 		</signal>
 
 		<signal name="stream_failed">
-			<param index="0" name="result" type="int" enum="IcyHttpStream.Result" />
+			<param index="0" name="result" type="int" enum="RadioStream.Result" />
 			<param index="1" name="http_code" type="int" />
 			<description>
-				Emitted when the connection is lost or could not be opened. [param result] is the [enum IcyHttpStream.Result] and [param http_code] is the HTTP status code, or [code]0[/code] if there was none. The state is already [constant STATE_RECONNECTING] or [constant STATE_FAILED] when this is emitted, so a handler can call [method play] or [method stop] to change what happens next. Not emitted when [method stop] is called.
+				Emitted when the connection is lost or could not be opened. [param result] is the [enum RadioStream.Result] and [param http_code] is the HTTP status code, or [code]0[/code] if there was none. The state is already [constant STATE_RECONNECTING] or [constant STATE_FAILED] when this is emitted, so a handler can call [method play] or [method stop] to change what happens next. Not emitted when [method stop] is called.
 			</description>
 		</signal>
 	</signals>
@@ -55,7 +55,7 @@
 			<param index="0" name="url" type="String" />
 			<param index="1" name="custom_headers" type="PackedStringArray" default="PackedStringArray()" />
 			<description>
-				Stops the current stream, if any, and connects to [param url]. [param custom_headers] are passed to [method IcyHttpStream.request] (for example a [code]User-Agent[/code] header). Returns [constant ERR_UNCONFIGURED] if [member player_path] does not point to a usable player node, or the error returned by [method IcyHttpStream.request]. Errors that happen later are reported through [signal stream_failed].
+				Stops the current stream, if any, and connects to [param url]. [param custom_headers] are passed to [method RadioStream.request] (for example a [code]User-Agent[/code] header). Returns [constant ERR_UNCONFIGURED] if [member player_path] does not point to a usable player node, or the error returned by [method RadioStream.request]. Errors that happen later are reported through [signal stream_failed].
 			</description>
 		</method>
 
@@ -74,7 +74,7 @@
 		</method>
 
 		<method name="get_state" qualifiers="const">
-			<return type="int" enum="IcyRadioPlayer.State" />
+			<return type="int" enum="RadioPlayer.State" />
 			<description>
 				Returns the current [enum State].
 			</description>
@@ -88,14 +88,14 @@
 		</method>
 
 		<method name="get_http_stream" qualifiers="const">
-			<return type="IcyHttpStream" />
+			<return type="RadioStream" />
 			<description>
-				Returns the [IcyHttpStream] owned by this node. Useful for reading the response headers or the number of downloaded bytes.
+				Returns the [RadioStream] owned by this node. Useful for reading the response headers or the number of downloaded bytes.
 			</description>
 		</method>
 
 		<method name="get_audio_decoder" qualifiers="const">
-			<return type="IcyAudioDecoder" />
+			<return type="RadioDecoder" />
 			<description>
 				Returns the decoder of the current connection (for buffering progress or the stream format), or [code]null[/code] when no connection is open.
 			</description>
@@ -113,13 +113,13 @@
 			How many seconds to wait before reconnecting after the connection is lost or fails. [code]0[/code] disables reconnecting; the node goes to [constant STATE_FAILED] instead. An unsupported content type never reconnects.
 		</member>
 		<member name="connect_timeout" type="float" setter="set_connect_timeout" getter="get_connect_timeout" default="5.0">
-			Passed to [method IcyHttpStream.request] as the connect timeout.
+			Passed to [method RadioStream.request] as the connect timeout.
 		</member>
 		<member name="stall_timeout" type="float" setter="set_stall_timeout" getter="get_stall_timeout" default="10.0">
-			Same as [member IcyHttpStream.stall_timeout].
+			Same as [member RadioStream.stall_timeout].
 		</member>
 		<member name="parse_metadata" type="bool" setter="set_parse_metadata" getter="get_parse_metadata" default="true">
-			If [code]true[/code], ICY metadata is requested from the server and reported through [signal metadata_received].
+			If [code]true[/code], stream metadata is requested from the server and reported through [signal metadata_received].
 		</member>
 	</members>
 

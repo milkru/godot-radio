@@ -1,4 +1,4 @@
-#include "icy_audio_decoder.hpp"
+#include "radio_decoder.hpp"
 #include "godot_cpp/classes/audio_stream_generator_playback.hpp"
 #include "godot_cpp/core/class_db.hpp"
 #include "godot_cpp/core/error_macros.hpp"
@@ -10,19 +10,19 @@
 
 using namespace godot;
 
-void IcyAudioDecoder::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_playback", "playback"), &IcyAudioDecoder::set_playback);
-	ClassDB::bind_method(D_METHOD("set_buffer_thresholds", "target_frames"), &IcyAudioDecoder::set_buffer_thresholds);
-	ClassDB::bind_method(D_METHOD("process_audio"), &IcyAudioDecoder::process_audio);
-	ClassDB::bind_method(D_METHOD("reset"), &IcyAudioDecoder::reset);
-	ClassDB::bind_method(D_METHOD("get_buffering_progress"), &IcyAudioDecoder::get_buffering_progress);
-	ClassDB::bind_method(D_METHOD("is_buffering"), &IcyAudioDecoder::get_is_buffering);
-	ClassDB::bind_method(D_METHOD("get_current_target_frames"), &IcyAudioDecoder::get_current_target_frames);
-	ClassDB::bind_method(D_METHOD("get_current_max_capacity_frames"), &IcyAudioDecoder::get_current_max_capacity_frames);
-	ClassDB::bind_method(D_METHOD("set_bitrate_hint", "kbps"), &IcyAudioDecoder::set_bitrate_hint);
-	ClassDB::bind_method(D_METHOD("get_stream_sample_rate"), &IcyAudioDecoder::get_stream_sample_rate);
-	ClassDB::bind_method(D_METHOD("get_stream_channels"), &IcyAudioDecoder::get_stream_channels);
-	ClassDB::bind_static_method("IcyAudioDecoder", D_METHOD("create_for_mime_type", "mime_type"), &IcyAudioDecoder::create_for_mime_type);
+void RadioDecoder::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_playback", "playback"), &RadioDecoder::set_playback);
+	ClassDB::bind_method(D_METHOD("set_buffer_thresholds", "target_frames"), &RadioDecoder::set_buffer_thresholds);
+	ClassDB::bind_method(D_METHOD("process_audio"), &RadioDecoder::process_audio);
+	ClassDB::bind_method(D_METHOD("reset"), &RadioDecoder::reset);
+	ClassDB::bind_method(D_METHOD("get_buffering_progress"), &RadioDecoder::get_buffering_progress);
+	ClassDB::bind_method(D_METHOD("is_buffering"), &RadioDecoder::get_is_buffering);
+	ClassDB::bind_method(D_METHOD("get_current_target_frames"), &RadioDecoder::get_current_target_frames);
+	ClassDB::bind_method(D_METHOD("get_current_max_capacity_frames"), &RadioDecoder::get_current_max_capacity_frames);
+	ClassDB::bind_method(D_METHOD("set_bitrate_hint", "kbps"), &RadioDecoder::set_bitrate_hint);
+	ClassDB::bind_method(D_METHOD("get_stream_sample_rate"), &RadioDecoder::get_stream_sample_rate);
+	ClassDB::bind_method(D_METHOD("get_stream_channels"), &RadioDecoder::get_stream_channels);
+	ClassDB::bind_static_method("RadioDecoder", D_METHOD("create_for_mime_type", "mime_type"), &RadioDecoder::create_for_mime_type);
 
 	ADD_SIGNAL(MethodInfo("buffering_started"));
 	ADD_SIGNAL(MethodInfo("buffering_finished"));
@@ -31,7 +31,7 @@ void IcyAudioDecoder::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("stream_error", PropertyInfo(Variant::STRING, "message")));
 }
 
-HashMap<String, IcyAudioDecoder::DecoderFactory> &IcyAudioDecoder::get_decoder_registry() {
+HashMap<String, RadioDecoder::DecoderFactory> &RadioDecoder::get_decoder_registry() {
 	static HashMap<String, DecoderFactory> registry;
 	return registry;
 }
@@ -42,76 +42,76 @@ static String normalize_mime_type(const String &p_mime_type) {
 	return base.strip_edges().to_lower();
 }
 
-void IcyAudioDecoder::register_decoder(const String &p_mime_type, DecoderFactory p_factory) {
+void RadioDecoder::register_decoder(const String &p_mime_type, DecoderFactory p_factory) {
 	get_decoder_registry()[normalize_mime_type(p_mime_type)] = p_factory;
 }
 
-Ref<IcyAudioDecoder> IcyAudioDecoder::create_for_mime_type(const String &p_mime_type) {
+Ref<RadioDecoder> RadioDecoder::create_for_mime_type(const String &p_mime_type) {
 	HashMap<String, DecoderFactory> &registry = get_decoder_registry();
 	HashMap<String, DecoderFactory>::Iterator it = registry.find(normalize_mime_type(p_mime_type));
 
 	if (it == registry.end()) {
-		return Ref<IcyAudioDecoder>();
+		return Ref<RadioDecoder>();
 	}
 
 	DecoderFactory factory = it->value;
 	if (!factory) {
-		return Ref<IcyAudioDecoder>();
+		return Ref<RadioDecoder>();
 	}
 
 	return factory();
 }
 
-real_t IcyAudioDecoder::get_buffering_progress() const {
+real_t RadioDecoder::get_buffering_progress() const {
 	return buffering_progress;
 }
 
-bool IcyAudioDecoder::get_is_buffering() const {
+bool RadioDecoder::get_is_buffering() const {
 	return is_buffering;
 }
 
-int IcyAudioDecoder::get_current_target_frames() const {
+int RadioDecoder::get_current_target_frames() const {
 	return target_buffer_frames;
 }
 
-int IcyAudioDecoder::get_current_max_capacity_frames() const {
+int RadioDecoder::get_current_max_capacity_frames() const {
 	return max_capacity_buffer_frames;
 }
 
-int IcyAudioDecoder::get_stream_sample_rate() const {
+int RadioDecoder::get_stream_sample_rate() const {
 	return stream_sample_rate;
 }
 
-int IcyAudioDecoder::get_stream_channels() const {
+int RadioDecoder::get_stream_channels() const {
 	return stream_channels;
 }
 
-void IcyAudioDecoder::set_playback(const Ref<AudioStreamGeneratorPlayback> p_playback) {
+void RadioDecoder::set_playback(const Ref<AudioStreamGeneratorPlayback> p_playback) {
 	playback = p_playback;
 	max_capacity_buffer_frames = playback.is_valid() ? playback->get_frames_available() : 0;
 }
 
-void IcyAudioDecoder::set_buffer_thresholds(int p_target_frames) {
+void RadioDecoder::set_buffer_thresholds(int p_target_frames) {
 	target_buffer_frames = p_target_frames;
 }
 
 // one second of encoded audio at the given bitrate, never below the floor
-size_t IcyAudioDecoder::_threshold_for_bitrate(int p_kbps) {
+size_t RadioDecoder::_threshold_for_bitrate(int p_kbps) {
 	const size_t computed = (static_cast<size_t>(p_kbps) * BITS_PER_KILOBIT) / BITS_PER_BYTE;
 	return MAX(computed, MIN_BYTE_THRESHOLD);
 }
 
-void IcyAudioDecoder::set_bitrate_hint(int p_kbps) {
+void RadioDecoder::set_bitrate_hint(int p_kbps) {
 	if (p_kbps <= 0) { return; }
 	byte_threshold = _threshold_for_bitrate(p_kbps);
 	is_bitrate_hinted = true;
 }
 
-void IcyAudioDecoder::push_encoded_data(const PackedByteArray &p_data) {
+void RadioDecoder::push_encoded_data(const PackedByteArray &p_data) {
 	push_encoded_data(p_data.ptr(), static_cast<size_t>(p_data.size()));
 }
 
-void IcyAudioDecoder::push_encoded_data(const uint8_t *p_data, size_t p_size) {
+void RadioDecoder::push_encoded_data(const uint8_t *p_data, size_t p_size) {
 	if (p_data == nullptr || p_size == 0) { return; }
 
 	const uint8_t *src = p_data;
@@ -148,13 +148,13 @@ void IcyAudioDecoder::push_encoded_data(const uint8_t *p_data, size_t p_size) {
 
 	if (dropped_bytes > 0) {
 		// verbose only: stations that open with a large burst overrun the ring in normal use
-		UtilityFunctions::print_verbose("IcyAudioDecoder: jitter buffer overrun, dropping oldest audio.");
+		UtilityFunctions::print_verbose("RadioDecoder: jitter buffer overrun, dropping oldest audio.");
 		// Runs on the network thread; the signal has to go through the message queue.
 		call_deferred("emit_signal", "buffer_overrun", static_cast<int>(dropped_bytes));
 	}
 }
 
-size_t IcyAudioDecoder::read_encoded(uint8_t *r_out, size_t p_max_bytes) {
+size_t RadioDecoder::read_encoded(uint8_t *r_out, size_t p_max_bytes) {
 	std::lock_guard<std::mutex> lock(buffer_mutex);
 
 	size_t bytes_to_copy = MIN(p_max_bytes, total_buffered_bytes);
@@ -172,7 +172,7 @@ size_t IcyAudioDecoder::read_encoded(uint8_t *r_out, size_t p_max_bytes) {
 	return bytes_to_copy;
 }
 
-void IcyAudioDecoder::reset() {
+void RadioDecoder::reset() {
 	{
 		std::lock_guard<std::mutex> lock(buffer_mutex);
 		ring_read_pos = 0;
@@ -190,7 +190,7 @@ void IcyAudioDecoder::reset() {
 	buffering_progress = 0.0f;
 }
 
-void IcyAudioDecoder::process_audio() {
+void RadioDecoder::process_audio() {
 	while (true) {
 		if (pending.frames == 0) {
 			// the first batch is decoded before a playback is required: its format is announced through
@@ -213,7 +213,7 @@ void IcyAudioDecoder::process_audio() {
 				break;
 			}
 			if (pending.channels < 1 || pending.channels > MAX_CHANNELS || pending.frames > MAX_BATCH_FRAMES) {
-				const String message = "IcyAudioDecoder: codec returned an invalid batch (" + itos(pending.frames) + " frames, " + itos(pending.channels) + " channels)";
+				const String message = "RadioDecoder: codec returned an invalid batch (" + itos(pending.frames) + " frames, " + itos(pending.channels) + " channels)";
 				pending.frames = 0;
 				ERR_FAIL_MSG(message);
 			}
@@ -237,22 +237,22 @@ void IcyAudioDecoder::process_audio() {
 	update_buffering_state();
 }
 
-bool IcyAudioDecoder::_has_room_for_batch() const {
+bool RadioDecoder::_has_room_for_batch() const {
 	return playback.is_valid() && playback->get_frames_available() >= MAX_BATCH_FRAMES;
 }
 
-void IcyAudioDecoder::_count_probe_failure() {
+void RadioDecoder::_count_probe_failure() {
 	// a failed first decode has eaten byte_threshold bytes; on a mislabelled stream (AAC behind audio/mpeg
 	// is common on SHOUTcast v1) this would otherwise repeat silently forever
 	++probe_failures;
 	if (probe_failures == MAX_PROBE_FAILURES) {
-		const String message = "IcyAudioDecoder: could not detect the stream format after " + itos(probe_failures) + " attempts. Is the content type correct?";
+		const String message = "RadioDecoder: could not detect the stream format after " + itos(probe_failures) + " attempts. Is the content type correct?";
 		ERR_PRINT(message);
 		emit_signal("stream_error", message);
 	}
 }
 
-void IcyAudioDecoder::_announce_stream_info() {
+void RadioDecoder::_announce_stream_info() {
 	stream_sample_rate = pending.sample_rate;
 	stream_channels = pending.channels;
 	is_stream_info_known = true;
@@ -268,7 +268,7 @@ void IcyAudioDecoder::_announce_stream_info() {
 	emit_signal("stream_info_ready");
 }
 
-void IcyAudioDecoder::_push_pending_batch() {
+void RadioDecoder::_push_pending_batch() {
 	godot_frames.resize(pending.frames);
 	Vector2 *out_ptr = godot_frames.ptrw();
 	const float *in_ptr = pcm_buffer;
@@ -287,7 +287,7 @@ void IcyAudioDecoder::_push_pending_batch() {
 	pending.frames = 0;
 }
 
-void IcyAudioDecoder::update_buffering_state() {
+void RadioDecoder::update_buffering_state() {
 	if (playback.is_null()) { return; }
 
 	const int frames_available = playback->get_frames_available();
@@ -300,7 +300,7 @@ void IcyAudioDecoder::update_buffering_state() {
 	// so the clamp lives here rather than in the setter
 	int target_frames = target_buffer_frames;
 	if (target_frames > max_capacity_buffer_frames) {
-		WARN_PRINT_ONCE("IcyAudioDecoder: target buffer frames exceed the playback's capacity, clamping. Increase the generator's buffer_length or lower set_buffer_thresholds().");
+		WARN_PRINT_ONCE("RadioDecoder: target buffer frames exceed the playback's capacity, clamping. Increase the generator's buffer_length or lower set_buffer_thresholds().");
 		target_frames = max_capacity_buffer_frames;
 	}
 	target_frames = MAX(target_frames, 1);

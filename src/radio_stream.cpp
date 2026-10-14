@@ -1,4 +1,4 @@
-#include "icy_http_stream.hpp"
+#include "radio_stream.hpp"
 #include "godot_cpp/classes/engine.hpp"
 #include "godot_cpp/classes/global_constants.hpp"
 #include "godot_cpp/classes/ip.hpp"
@@ -64,12 +64,12 @@ static String decode_text(const uint8_t *p_data, int p_size) {
 	return text;
 }
 
-IcyHttpStream::IcyHttpStream() {
+RadioStream::RadioStream() {
 	tls_options = TLSOptions::client();
 	thread.instantiate();
 }
 
-IcyHttpStream::~IcyHttpStream() {
+RadioStream::~RadioStream() {
 	thread_request_quit.set();
 	{
 		std::lock_guard<std::mutex> lock(client_mutex);
@@ -80,19 +80,19 @@ IcyHttpStream::~IcyHttpStream() {
 	}
 }
 
-void IcyHttpStream::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("request", "url", "connect_timeout", "parse_metadata", "custom_headers"), &IcyHttpStream::request, DEFVAL(DEFAULT_CONNECT_TIMEOUT), DEFVAL(false), DEFVAL(PackedStringArray()));
-	ClassDB::bind_method(D_METHOD("cancel_request"), &IcyHttpStream::cancel_request);
-	ClassDB::bind_method(D_METHOD("is_requesting"), &IcyHttpStream::is_requesting);
-	ClassDB::bind_method(D_METHOD("set_stall_timeout", "seconds"), &IcyHttpStream::set_stall_timeout);
-	ClassDB::bind_method(D_METHOD("get_stall_timeout"), &IcyHttpStream::get_stall_timeout);
-	ClassDB::bind_method(D_METHOD("get_content_mime_type"), &IcyHttpStream::get_content_mime_type);
-	ClassDB::bind_method(D_METHOD("get_response_code"), &IcyHttpStream::get_response_code);
-	ClassDB::bind_method(D_METHOD("get_response_headers"), &IcyHttpStream::get_response_headers);
-	ClassDB::bind_method(D_METHOD("get_response_headers_as_dictionary"), &IcyHttpStream::get_response_headers_as_dictionary);
-	ClassDB::bind_method(D_METHOD("get_downloaded_bytes"), &IcyHttpStream::get_downloaded_bytes);
-	ClassDB::bind_method(D_METHOD("set_audio_decoder", "audio_decoder"), &IcyHttpStream::set_audio_decoder);
-	ClassDB::bind_method(D_METHOD("get_audio_decoder"), &IcyHttpStream::get_audio_decoder);
+void RadioStream::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("request", "url", "connect_timeout", "parse_metadata", "custom_headers"), &RadioStream::request, DEFVAL(DEFAULT_CONNECT_TIMEOUT), DEFVAL(false), DEFVAL(PackedStringArray()));
+	ClassDB::bind_method(D_METHOD("cancel_request"), &RadioStream::cancel_request);
+	ClassDB::bind_method(D_METHOD("is_requesting"), &RadioStream::is_requesting);
+	ClassDB::bind_method(D_METHOD("set_stall_timeout", "seconds"), &RadioStream::set_stall_timeout);
+	ClassDB::bind_method(D_METHOD("get_stall_timeout"), &RadioStream::get_stall_timeout);
+	ClassDB::bind_method(D_METHOD("get_content_mime_type"), &RadioStream::get_content_mime_type);
+	ClassDB::bind_method(D_METHOD("get_response_code"), &RadioStream::get_response_code);
+	ClassDB::bind_method(D_METHOD("get_response_headers"), &RadioStream::get_response_headers);
+	ClassDB::bind_method(D_METHOD("get_response_headers_as_dictionary"), &RadioStream::get_response_headers_as_dictionary);
+	ClassDB::bind_method(D_METHOD("get_downloaded_bytes"), &RadioStream::get_downloaded_bytes);
+	ClassDB::bind_method(D_METHOD("set_audio_decoder", "audio_decoder"), &RadioStream::set_audio_decoder);
+	ClassDB::bind_method(D_METHOD("get_audio_decoder"), &RadioStream::get_audio_decoder);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "stall_timeout", PROPERTY_HINT_RANGE, "0,60,0.1,or_greater,suffix:s"), "set_stall_timeout", "get_stall_timeout");
 
@@ -113,7 +113,7 @@ void IcyHttpStream::_bind_methods() {
 	BIND_ENUM_CONSTANT(RESULT_UNSUPPORTED_FORMAT);
 }
 
-IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
+RadioStream::ParsedUrl RadioStream::_parse_url(const String &p_url) {
 	ParsedUrl result;
 
 	String scheme;
@@ -171,7 +171,7 @@ IcyHttpStream::ParsedUrl IcyHttpStream::_parse_url(const String &p_url) {
 	return result;
 }
 
-void IcyHttpStream::_apply_parsed_url(const ParsedUrl &p_parsed) {
+void RadioStream::_apply_parsed_url(const ParsedUrl &p_parsed) {
 	url = p_parsed.host;
 	port = p_parsed.port;
 	use_tls = p_parsed.use_tls;
@@ -179,20 +179,20 @@ void IcyHttpStream::_apply_parsed_url(const ParsedUrl &p_parsed) {
 }
 
 // starts resolving the host; _update_connection() connects once the address is in
-Error IcyHttpStream::_connect_socket() {
+Error RadioStream::_connect_socket() {
 	_close_socket();
 	resolve_id = IP::get_singleton()->resolve_hostname_queue_item(url);
 	return resolve_id == IP::RESOLVER_INVALID_ID ? ERR_CANT_RESOLVE : OK;
 }
 
-IcyHttpStream::Result IcyHttpStream::_closed_result(Error p_read_error) const {
+RadioStream::Result RadioStream::_closed_result(Error p_read_error) const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	if (response_code == 0) { return RESULT_REQUEST_FAILED; }
 	// end of file is the server closing, how a live stream ends; anything else is a broken connection
 	return p_read_error == ERR_FILE_EOF ? RESULT_DISCONNECTED : RESULT_CONNECTION_ERROR;
 }
 
-bool IcyHttpStream::_connect_next_address() {
+bool RadioStream::_connect_next_address() {
 	while (!addresses.is_empty()) {
 		const String address = addresses.pop_front();
 		tcp.instantiate();
@@ -201,7 +201,7 @@ bool IcyHttpStream::_connect_next_address() {
 	return false;
 }
 
-void IcyHttpStream::_close_socket() {
+void RadioStream::_close_socket() {
 	if (resolve_id != IP::RESOLVER_INVALID_ID) {
 		IP::get_singleton()->erase_resolve_item(resolve_id);
 		resolve_id = IP::RESOLVER_INVALID_ID;
@@ -218,11 +218,11 @@ void IcyHttpStream::_close_socket() {
 	addresses.clear();
 }
 
-void IcyHttpStream::_reset_icy_state() {
-	icy_demuxer.reset(0);
+void RadioStream::_reset_metadata_state() {
+	metadata_demuxer.reset(0);
 }
 
-Error IcyHttpStream::request(const String &p_url, real_t p_connect_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
+Error RadioStream::request(const String &p_url, real_t p_connect_timeout, bool p_parse_metadata, const PackedStringArray &p_custom_headers) {
 	if (requesting.is_set()) { return ERR_BUSY; }
 
 	ParsedUrl parsed = _parse_url(p_url);
@@ -245,7 +245,7 @@ Error IcyHttpStream::request(const String &p_url, real_t p_connect_timeout, bool
 		response_headers.clear();
 	}
 
-	parse_icy_metadata = p_parse_metadata;
+	parse_stream_metadata = p_parse_metadata;
 	timeout_msec = static_cast<uint64_t>(p_connect_timeout * MSEC_PER_SEC);
 	stall_timeout_msec = static_cast<uint64_t>(stall_timeout * MSEC_PER_SEC);
 	timeout_start_msec = Time::get_singleton()->get_ticks_msec();
@@ -278,22 +278,22 @@ Error IcyHttpStream::request(const String &p_url, real_t p_connect_timeout, bool
 	}
 	request_headers.append_array(p_custom_headers);
 
-	_reset_icy_state();
+	_reset_metadata_state();
 
 	requesting.set();
 	thread_request_quit.clear();
 	result_emitted.clear();
 
-	Error err = thread->start(callable_mp(this, &IcyHttpStream::_thread_func));
+	Error err = thread->start(callable_mp(this, &RadioStream::_thread_func));
 	if (err != OK) {
 		requesting.clear();
 	}
-	ERR_FAIL_COND_V_MSG(err != OK, err, "IcyHttpStream: could not start the network thread.");
+	ERR_FAIL_COND_V_MSG(err != OK, err, "RadioStream: could not start the network thread.");
 
 	return OK;
 }
 
-void IcyHttpStream::cancel_request() {
+void RadioStream::cancel_request() {
 	if (!is_requesting()) { return; }
 
 	thread_request_quit.set();
@@ -318,49 +318,49 @@ void IcyHttpStream::cancel_request() {
 	}
 }
 
-bool IcyHttpStream::is_requesting() const {
+bool RadioStream::is_requesting() const {
 	return requesting.is_set();
 }
 
-void IcyHttpStream::set_stall_timeout(real_t p_seconds) {
+void RadioStream::set_stall_timeout(real_t p_seconds) {
 	stall_timeout = MAX(p_seconds, static_cast<real_t>(0));
 }
 
-real_t IcyHttpStream::get_stall_timeout() const {
+real_t RadioStream::get_stall_timeout() const {
 	return stall_timeout;
 }
 
-String IcyHttpStream::get_content_mime_type() const {
+String RadioStream::get_content_mime_type() const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return content_type;
 }
 
-int IcyHttpStream::get_response_code() const {
+int RadioStream::get_response_code() const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return response_code;
 }
 
-void IcyHttpStream::set_audio_decoder(const Ref<IcyAudioDecoder> p_decoder) {
+void RadioStream::set_audio_decoder(const Ref<RadioDecoder> p_decoder) {
 	std::lock_guard<std::mutex> lock(decoder_mutex);
 	audio_decoder = p_decoder;
 	is_decoder_user_supplied = p_decoder.is_valid();
 }
 
-Ref<IcyAudioDecoder> IcyHttpStream::get_audio_decoder() const {
+Ref<RadioDecoder> RadioStream::get_audio_decoder() const {
 	std::lock_guard<std::mutex> lock(decoder_mutex);
 	return audio_decoder;
 }
 
-PackedStringArray IcyHttpStream::get_response_headers() const {
+PackedStringArray RadioStream::get_response_headers() const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	return response_headers;
 }
 
-int IcyHttpStream::get_downloaded_bytes() const {
+int RadioStream::get_downloaded_bytes() const {
 	return downloaded.get();
 }
 
-Dictionary IcyHttpStream::get_response_headers_as_dictionary() const {
+Dictionary RadioStream::get_response_headers_as_dictionary() const {
 	std::lock_guard<std::mutex> lock(response_state_mutex);
 	Dictionary dict;
 
@@ -375,7 +375,7 @@ Dictionary IcyHttpStream::get_response_headers_as_dictionary() const {
 	return dict;
 }
 
-void IcyHttpStream::_thread_func() {
+void RadioStream::_thread_func() {
 	Error err;
 	{
 		std::lock_guard<std::mutex> lock(client_mutex);
@@ -402,7 +402,7 @@ void IcyHttpStream::_thread_func() {
 	requesting.clear();
 }
 
-IcyHttpStream::PollStep IcyHttpStream::_update_connection() {
+RadioStream::PollStep RadioStream::_update_connection() {
 	PackedByteArray chunk;
 	Error read_error = OK;
 	{
@@ -541,7 +541,7 @@ IcyHttpStream::PollStep IcyHttpStream::_update_connection() {
 	return PollStep::KEEP_POLLING;
 }
 
-IcyHttpStream::PollStep IcyHttpStream::_read_response_head(const PackedByteArray &p_data, PackedByteArray &r_body) {
+RadioStream::PollStep RadioStream::_read_response_head(const PackedByteArray &p_data, PackedByteArray &r_body) {
 	header_bytes.append_array(p_data);
 	const uint8_t *bytes = header_bytes.ptr();
 	const int size = header_bytes.size();
@@ -581,7 +581,7 @@ IcyHttpStream::PollStep IcyHttpStream::_read_response_head(const PackedByteArray
 	return PollStep::KEEP_POLLING;
 }
 
-IcyHttpStream::PollStep IcyHttpStream::_handle_response(int p_response_code, const PackedStringArray &p_headers) {
+RadioStream::PollStep RadioStream::_handle_response(int p_response_code, const PackedStringArray &p_headers) {
 	{
 		std::lock_guard<std::mutex> lock(response_state_mutex);
 		response_headers = p_headers;
@@ -610,8 +610,8 @@ IcyHttpStream::PollStep IcyHttpStream::_handle_response(int p_response_code, con
 
 		if (key == "content-type") {
 			new_content_type = value;
-		} else if (key == "icy-metaint" && parse_icy_metadata) {
-			icy_demuxer.reset(value.to_int());
+		} else if (key == "icy-metaint" && parse_stream_metadata) {
+			metadata_demuxer.reset(value.to_int());
 		} else if (key == "icy-br") {
 			bitrate_kbps = value.to_int();
 		} else if (key == "content-length") {
@@ -637,15 +637,15 @@ IcyHttpStream::PollStep IcyHttpStream::_handle_response(int p_response_code, con
 // The registry is read-only after init and the new decoder is invisible to everyone until it is published under
 // decoder_mutex, so creating it here on the worker thread is safe. The first body byte then lands in a ring that
 // exists, instead of being dropped while connection_opened waits in the message queue
-IcyHttpStream::PollStep IcyHttpStream::_attach_decoder(const String &p_content_type, int p_bitrate_kbps) {
+RadioStream::PollStep RadioStream::_attach_decoder(const String &p_content_type, int p_bitrate_kbps) {
 	{
 		std::lock_guard<std::mutex> lock(decoder_mutex);
 		if (is_decoder_user_supplied) { return PollStep::KEEP_POLLING; }
 	}
 
-	Ref<IcyAudioDecoder> decoder = IcyAudioDecoder::create_for_mime_type(p_content_type);
+	Ref<RadioDecoder> decoder = RadioDecoder::create_for_mime_type(p_content_type);
 	if (decoder.is_null()) {
-		ERR_PRINT("IcyHttpStream: no decoder registered for content type '" + p_content_type + "'");
+		ERR_PRINT("RadioStream: no decoder registered for content type '" + p_content_type + "'");
 		_finish_with_result(RESULT_UNSUPPORTED_FORMAT);
 		return PollStep::STOP;
 	}
@@ -659,7 +659,7 @@ IcyHttpStream::PollStep IcyHttpStream::_attach_decoder(const String &p_content_t
 }
 
 // KEEP_POLLING once the follow-up request is in flight, STOP if a terminal result was emitted
-IcyHttpStream::PollStep IcyHttpStream::_follow_redirect(const PackedStringArray &p_headers) {
+RadioStream::PollStep RadioStream::_follow_redirect(const PackedStringArray &p_headers) {
 	if (redirections >= MAX_REDIRECTIONS) {
 		_finish_with_result(RESULT_REDIRECT_LIMIT_REACHED);
 		return PollStep::STOP;
@@ -703,24 +703,24 @@ IcyHttpStream::PollStep IcyHttpStream::_follow_redirect(const PackedStringArray 
 	downloaded.set(0);
 	++redirections;
 	body_left = -1;
-	_reset_icy_state();
+	_reset_metadata_state();
 
 	return PollStep::KEEP_POLLING;
 }
 
 // the demuxer hands out views into p_chunk; nothing is sliced or copied before reaching the ring
-void IcyHttpStream::_process_chunk(const PackedByteArray &p_chunk) {
-	icy_demuxer.feed(p_chunk.ptr(), p_chunk.size(),
+void RadioStream::_process_chunk(const PackedByteArray &p_chunk) {
+	metadata_demuxer.feed(p_chunk.ptr(), p_chunk.size(),
 			[this](const uint8_t *p_data, int p_size) { _forward_data_to_decoder(p_data, p_size); },
 			[this](const uint8_t *p_data, int p_size) { _emit_metadata_deferred(p_data, p_size); });
 }
 
-void IcyHttpStream::_emit_connected_deferred() {
+void RadioStream::_emit_connected_deferred() {
 	call_deferred("emit_signal", "connection_opened");
 }
 
 // emits connection_closed on the main thread and asks the worker loop to exit
-void IcyHttpStream::_finish_with_result(int p_status) {
+void RadioStream::_finish_with_result(int p_status) {
 	result_emitted.set();
 	thread_request_quit.set();
 	// cleared before the signal is queued so a connection_closed handler can call request() again
@@ -730,7 +730,7 @@ void IcyHttpStream::_finish_with_result(int p_status) {
 }
 
 // not deferred on purpose: the decoder is thread-safe and audio data must not wait a frame in the message queue
-void IcyHttpStream::_forward_data_to_decoder(const uint8_t *p_data, int p_size) {
+void RadioStream::_forward_data_to_decoder(const uint8_t *p_data, int p_size) {
 	std::lock_guard<std::mutex> lock(decoder_mutex);
 
 	if (audio_decoder.is_valid()) {
@@ -739,7 +739,7 @@ void IcyHttpStream::_forward_data_to_decoder(const uint8_t *p_data, int p_size) 
 }
 
 // string decoding and cleanup happen here on the worker thread, only the emit is deferred
-void IcyHttpStream::_emit_metadata_deferred(const uint8_t *p_data, int p_size) {
+void RadioStream::_emit_metadata_deferred(const uint8_t *p_data, int p_size) {
 	// icecast pads metadata with null bytes. The UTF-8 parser stops at the first, but the Latin-1 fallback would
 	// keep them, so they are cut first
 	const uint8_t *nul = static_cast<const uint8_t *>(memchr(p_data, 0, p_size));

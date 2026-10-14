@@ -9,16 +9,16 @@
 #include "godot_cpp/variant/node_path.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
 #include "godot_cpp/variant/string.hpp"
-#include "icy_audio_decoder.hpp"
-#include "icy_http_stream.hpp"
+#include "radio_decoder.hpp"
+#include "radio_stream.hpp"
 
 namespace godot {
 
-// Owns one IcyHttpStream, the decoder it creates and the AudioStreamGenerator on the player node, and runs the
+// Owns one RadioStream, the decoder it creates and the AudioStreamGenerator on the player node, and runs the
 // order-sensitive startup sequence (probe -> mix_rate -> play -> playback) plus pause-on-underrun and reconnect.
 // The three underlying classes stay public for callers who want the pieces
-class IcyRadioPlayer : public Node {
-	GDCLASS(IcyRadioPlayer, Node);
+class RadioPlayer : public Node {
+	GDCLASS(RadioPlayer, Node);
 
 public:
 	enum State {
@@ -36,8 +36,8 @@ private:
 	static constexpr double DEFAULT_CONNECT_TIMEOUT = 5.0;
 	static constexpr double DEFAULT_BUFFER_LENGTH = 2.0;
 
-	Ref<IcyHttpStream> http_stream;
-	Ref<IcyAudioDecoder> decoder;
+	Ref<RadioStream> http_stream;
+	Ref<RadioDecoder> decoder;
 	Ref<AudioStreamGenerator> stream;
 
 	NodePath player_path;
@@ -56,7 +56,7 @@ private:
 	void _set_state(State p_state);
 	Error _start_request();
 	void _detach_decoder();
-	void _fail(IcyHttpStream::Result p_result);
+	void _fail(RadioStream::Result p_result);
 
 	void _on_connection_opened();
 	void _on_connection_closed(int p_result);
@@ -70,7 +70,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	IcyRadioPlayer();
+	RadioPlayer();
 
 	void _ready() override;
 	void _process(double p_delta) override;
@@ -81,8 +81,8 @@ public:
 	static String get_home_country();
 	State get_state() const;
 	Ref<AudioStreamGenerator> get_stream() const;
-	Ref<IcyHttpStream> get_http_stream() const;
-	Ref<IcyAudioDecoder> get_audio_decoder() const;
+	Ref<RadioStream> get_http_stream() const;
+	Ref<RadioDecoder> get_audio_decoder() const;
 
 	void set_player_path(const NodePath &p_path);
 	NodePath get_player_path() const;
@@ -100,4 +100,4 @@ public:
 
 } //namespace godot
 
-VARIANT_ENUM_CAST(IcyRadioPlayer::State);
+VARIANT_ENUM_CAST(RadioPlayer::State);

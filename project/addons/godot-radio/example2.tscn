@@ -1,6 +1,6 @@
 [gd_scene load_steps=3 format=3 uid="uid://6tgb1qg0tgbm"]
 
-[ext_resource type="Script" uid="uid://txux3ovkdd1n" path="res://addons/icy-radio-streamer/example2.gd" id="1_manual"]
+[ext_resource type="Script" uid="uid://txux3ovkdd1n" path="res://addons/godot-radio/example2.gd" id="1_manual"]
 
 [sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_manual"]
 buffer_length = 2.0

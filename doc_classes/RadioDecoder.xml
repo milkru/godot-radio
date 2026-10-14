@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class
-	name="IcyAudioDecoder"
+	name="RadioDecoder"
 	inherits="RefCounted"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd"
@@ -10,12 +10,12 @@
 	</brief_description>
 
 	<description>
-		[IcyAudioDecoder] is the base class for audio stream decoders. It handles the whole path from encoded data to audio frames:
+		[RadioDecoder] is the base class for audio stream decoders. It handles the whole path from encoded data to audio frames:
 		- incoming encoded data is stored in a fixed 128 KiB buffer (about 8 seconds at 128 kbps). If the buffer is full, the oldest bytes are dropped and [signal buffer_overrun] is emitted. This keeps playback close to live after a stall.
 		- [method process_audio] decodes the data one codec frame at a time and pushes the result into an [AudioStreamGeneratorPlayback].
 		- it tracks the buffering state and emits signals when buffering starts and finishes.
 		Decoding starts only after about one second of encoded data is buffered (see [method set_bitrate_hint]). When the codec runs out of data, the same amount is buffered again before decoding continues. The format of the first decoded frame is reported through [signal stream_info_ready]. Format changes during the stream are described there.
-		[IcyHttpStream] creates a decoder for the server's content type by itself, and [IcyRadioPlayer] does all the remaining steps, so most users do not use this class directly.
+		[RadioStream] creates a decoder for the server's content type by itself, and [RadioPlayer] does all the remaining steps, so most users do not use this class directly.
 
 		[b]Note:[/b] Derived classes only implement the codec (decode one frame, reset). Everything else is shared. Decoders are C++ classes; the codec methods are not available to scripts.
 	</description>
@@ -97,7 +97,7 @@
 			<param index="0" name="kbps" type="int" />
 			<description>
 				Sets how much encoded data (in bytes) must be buffered before decoding starts, and before it continues after the codec has run out of data. The amount is about one second of audio at [param kbps]: [code]max((kbps * 1000) / 8, 16384)[/code]. Streams below 128 kbps all use the minimum of 16384 bytes, which for them is more than one second. If this method is not called, the minimum is used for the first frame, and after that the bitrate reported by the codec is used (MP3 reports it). Values of [code]0[/code] or less are ignored.
-				[IcyHttpStream] calls this with the value of the server's [code]icy-br[/code] header on the decoders it creates.
+				[RadioStream] calls this with the value of the server's [code]icy-br[/code] header on the decoders it creates.
 			</description>
 		</method>
 
@@ -144,10 +144,10 @@
 		</method>
 
 		<method name="create_for_mime_type" qualifiers="static">
-			<return type="IcyAudioDecoder" />
+			<return type="RadioDecoder" />
 			<param index="0" name="mime_type" type="String" />
 			<description>
-				Creates and returns a new decoder for [code]mime_type[/code] (for example [code]"audio/mpeg"[/code]), or [code]null[/code] if no decoder is registered for that MIME type. Decoders register themselves when the extension is loaded. [IcyHttpStream] uses this method to create a decoder for each connection. Scripts only need it to use a decoder without the stream.
+				Creates and returns a new decoder for [code]mime_type[/code] (for example [code]"audio/mpeg"[/code]), or [code]null[/code] if no decoder is registered for that MIME type. Decoders register themselves when the extension is loaded. [RadioStream] uses this method to create a decoder for each connection. Scripts only need it to use a decoder without the stream.
 			</description>
 		</method>
 	</methods>

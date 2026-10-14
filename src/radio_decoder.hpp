@@ -14,11 +14,11 @@
 
 namespace godot {
 
-class IcyAudioDecoder : public RefCounted {
-	GDCLASS(IcyAudioDecoder, RefCounted);
+class RadioDecoder : public RefCounted {
+	GDCLASS(RadioDecoder, RefCounted);
 
 public:
-	using DecoderFactory = Ref<IcyAudioDecoder> (*)();
+	using DecoderFactory = Ref<RadioDecoder> (*)();
 
 protected:
 	// what one _decode_frames() call produced. The format describes this batch, not the stream as it was first
@@ -113,7 +113,7 @@ public:
 	int get_stream_channels() const;
 
 	static void register_decoder(const String &p_mime_type, DecoderFactory p_factory);
-	static Ref<IcyAudioDecoder> create_for_mime_type(const String &p_mime_type);
+	static Ref<RadioDecoder> create_for_mime_type(const String &p_mime_type);
 
 	// thread-safe, called from the network thread
 	void push_encoded_data(const uint8_t *p_data, size_t p_size);
