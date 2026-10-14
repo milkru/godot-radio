@@ -66,6 +66,13 @@
 			</description>
 		</method>
 
+		<method name="get_home_country" qualifiers="static">
+			<return type="String" />
+			<description>
+				Returns the two-letter ISO country code of the region set in the operating system, for picking local stations without looking anything up online. On Windows this is the "Country or region" setting, which often differs from the display language. Returns an empty string on other platforms or when no region is set.
+			</description>
+		</method>
+
 		<method name="get_state" qualifiers="const">
 			<return type="int" enum="IcyRadioPlayer.State" />
 			<description>

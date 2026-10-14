@@ -1,4 +1,5 @@
 #include "icy_radio_player.hpp"
+#include "home_country.hpp"
 #include "godot_cpp/classes/audio_stream_generator_playback.hpp"
 #include "godot_cpp/core/class_db.hpp"
 #include "godot_cpp/core/error_macros.hpp"
@@ -11,6 +12,7 @@ using namespace godot;
 void IcyRadioPlayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("play", "url", "custom_headers"), &IcyRadioPlayer::play, DEFVAL(PackedStringArray()));
 	ClassDB::bind_method(D_METHOD("stop"), &IcyRadioPlayer::stop);
+	ClassDB::bind_static_method("IcyRadioPlayer", D_METHOD("get_home_country"), &IcyRadioPlayer::get_home_country);
 	ClassDB::bind_method(D_METHOD("get_state"), &IcyRadioPlayer::get_state);
 	ClassDB::bind_method(D_METHOD("get_stream"), &IcyRadioPlayer::get_stream);
 	ClassDB::bind_method(D_METHOD("get_http_stream"), &IcyRadioPlayer::get_http_stream);
@@ -97,6 +99,12 @@ Error IcyRadioPlayer::play(const String &p_url, const PackedStringArray &p_custo
 	url = p_url;
 	custom_headers = p_custom_headers;
 	return _start_request();
+}
+
+String IcyRadioPlayer::get_home_country() {
+	char code[3];
+	get_home_country_code(code);
+	return String(code);
 }
 
 void IcyRadioPlayer::stop() {

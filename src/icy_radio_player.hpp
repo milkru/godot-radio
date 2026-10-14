@@ -78,6 +78,7 @@ public:
 
 	Error play(const String &p_url, const PackedStringArray &p_custom_headers = PackedStringArray());
 	void stop();
+	static String get_home_country();
 	State get_state() const;
 	Ref<AudioStreamGenerator> get_stream() const;
 	Ref<IcyHttpStream> get_http_stream() const;
