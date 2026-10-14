@@ -1,6 +1,7 @@
 #include "icy_http_stream.hpp"
+#include "godot_cpp/classes/engine.hpp"
 #include "godot_cpp/classes/global_constants.hpp"
-#include "godot_cpp/classes/http_client.hpp"
+#include "godot_cpp/classes/ip.hpp"
 #include "godot_cpp/classes/os.hpp"
 #include "godot_cpp/classes/time.hpp"
 #include "godot_cpp/classes/tls_options.hpp"
@@ -10,13 +11,60 @@
 #include "godot_cpp/variant/packed_byte_array.hpp"
 #include "godot_cpp/variant/packed_string_array.hpp"
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 
 using namespace godot;
 
+// strict, so it rejects everything the UTF-8 parser would log an error for
+static bool is_valid_utf8(const uint8_t *p_data, int p_size) {
+	for (int i = 0; i < p_size;) {
+		const uint8_t lead = p_data[i];
+		if (lead < 0x80) {
+			++i;
+			continue;
+		}
+		// overlong forms, surrogates and code points past U+10FFFF are ruled out by the first continuation byte
+		int extra = 0;
+		uint8_t low = 0x80;
+		uint8_t high = 0xBF;
+		if (lead >= 0xC2 && lead <= 0xDF) {
+			extra = 1;
+		} else if (lead >= 0xE0 && lead <= 0xEF) {
+			extra = 2;
+			low = lead == 0xE0 ? 0xA0 : 0x80;
+			high = lead == 0xED ? 0x9F : 0xBF;
+		} else if (lead >= 0xF0 && lead <= 0xF4) {
+			extra = 3;
+			low = lead == 0xF0 ? 0x90 : 0x80;
+			high = lead == 0xF4 ? 0x8F : 0xBF;
+		} else {
+			return false;
+		}
+		if (i + extra >= p_size || p_data[i + 1] < low || p_data[i + 1] > high) { return false; }
+		for (int k = 2; k <= extra; ++k) {
+			if ((p_data[i + k] & 0xC0) != 0x80) { return false; }
+		}
+		i += extra + 1;
+	}
+	return true;
+}
+
+// UTF-8, or Latin-1 as some SHOUTcast servers send, where every byte is the code point of the same value.
+// Checked up front because the UTF-8 parser logs an error for anything else
+static String decode_text(const uint8_t *p_data, int p_size) {
+	String text;
+	if (is_valid_utf8(p_data, p_size)) {
+		text.parse_utf8(reinterpret_cast<const char *>(p_data), p_size);
+		return text;
+	}
+	for (int i = 0; i < p_size; ++i) {
+		text += String::chr(p_data[i]);
+	}
+	return text;
+}
+
 IcyHttpStream::IcyHttpStream() {
-	client.instantiate();
-	client->set_read_chunk_size(READ_CHUNK_SIZE);
 	tls_options = TLSOptions::client();
 	thread.instantiate();
 }
@@ -25,7 +73,7 @@ IcyHttpStream::~IcyHttpStream() {
 	thread_request_quit.set();
 	{
 		std::lock_guard<std::mutex> lock(client_mutex);
-		client->close();
+		_close_socket();
 	}
 	if (thread.is_valid() && thread->is_started()) {
 		thread->wait_to_finish();
@@ -130,8 +178,44 @@ void IcyHttpStream::_apply_parsed_url(const ParsedUrl &p_parsed) {
 	request_string = p_parsed.request_string;
 }
 
+// starts resolving the host; _update_connection() connects once the address is in
 Error IcyHttpStream::_connect_socket() {
-	return client->connect_to_host(url, port, use_tls ? tls_options : nullptr);
+	_close_socket();
+	resolve_id = IP::get_singleton()->resolve_hostname_queue_item(url);
+	return resolve_id == IP::RESOLVER_INVALID_ID ? ERR_CANT_RESOLVE : OK;
+}
+
+IcyHttpStream::Result IcyHttpStream::_closed_result(Error p_read_error) const {
+	std::lock_guard<std::mutex> lock(response_state_mutex);
+	if (response_code == 0) { return RESULT_REQUEST_FAILED; }
+	// end of file is the server closing, how a live stream ends; anything else is a broken connection
+	return p_read_error == ERR_FILE_EOF ? RESULT_DISCONNECTED : RESULT_CONNECTION_ERROR;
+}
+
+bool IcyHttpStream::_connect_next_address() {
+	while (!addresses.is_empty()) {
+		const String address = addresses.pop_front();
+		tcp.instantiate();
+		if (tcp->connect_to_host(address, port) == OK) { return true; }
+	}
+	return false;
+}
+
+void IcyHttpStream::_close_socket() {
+	if (resolve_id != IP::RESOLVER_INVALID_ID) {
+		IP::get_singleton()->erase_resolve_item(resolve_id);
+		resolve_id = IP::RESOLVER_INVALID_ID;
+	}
+	if (tls.is_valid()) {
+		tls->disconnect_from_stream();
+		tls.unref();
+	}
+	if (tcp.is_valid()) {
+		tcp->disconnect_from_host();
+		tcp.unref();
+	}
+	header_bytes.clear();
+	addresses.clear();
 }
 
 void IcyHttpStream::_reset_icy_state() {
@@ -152,6 +236,7 @@ Error IcyHttpStream::request(const String &p_url, real_t p_connect_timeout, bool
 
 	request_sent = false;
 	redirections = 0;
+	body_left = -1;
 	downloaded.set(0);
 	{
 		std::lock_guard<std::mutex> lock(response_state_mutex);
@@ -167,6 +252,26 @@ Error IcyHttpStream::request(const String &p_url, real_t p_connect_timeout, bool
 
 	request_headers.clear();
 	request_headers.push_back("Connection: close");
+	// the defaults HTTPClient would send, unless the caller sets them
+	bool has_user_agent = false;
+	bool has_accept = false;
+	for (const String &header : p_custom_headers) {
+		has_user_agent = has_user_agent || header.to_lower().begins_with("user-agent:");
+		has_accept = has_accept || header.to_lower().begins_with("accept:");
+	}
+	if (!has_user_agent) {
+		// major.minor[.patch].status.build, like the engine's full build version
+		const Dictionary info = Engine::get_singleton()->get_version_info();
+		String version = String::num_int64(info["major"]) + "." + String::num_int64(info["minor"]);
+		if (static_cast<int>(info["patch"]) != 0) {
+			version += "." + String::num_int64(info["patch"]);
+		}
+		version += "." + String(info["status"]) + "." + String(info["build"]);
+		request_headers.push_back("User-Agent: GodotEngine/" + version + " (" + OS::get_singleton()->get_name() + ")");
+	}
+	if (!has_accept) {
+		request_headers.push_back("Accept: */*");
+	}
 
 	if (p_parse_metadata) {
 		request_headers.push_back("Icy-MetaData: 1");
@@ -194,7 +299,7 @@ void IcyHttpStream::cancel_request() {
 	thread_request_quit.set();
 	{
 		std::lock_guard<std::mutex> lock(client_mutex);
-		client->close();
+		_close_socket();
 	}
 
 	if (thread.is_valid() && thread->is_started()) {
@@ -299,106 +404,197 @@ void IcyHttpStream::_thread_func() {
 
 IcyHttpStream::PollStep IcyHttpStream::_update_connection() {
 	PackedByteArray chunk;
+	Error read_error = OK;
 	{
 		std::lock_guard<std::mutex> lock(client_mutex);
-		HTTPClient::Status current_status = client->get_status();
+		// cancel_request() closes the socket while this thread waits for the lock
+		if (thread_request_quit.is_set()) { return PollStep::STOP; }
+		if (resolve_id != IP::RESOLVER_INVALID_ID) {
+			IP *ip = IP::get_singleton();
+			IP::ResolverStatus resolve_status = ip->get_resolve_item_status(resolve_id);
+			if (resolve_status == IP::RESOLVER_STATUS_WAITING) { return PollStep::KEEP_POLLING; }
 
-		switch(current_status) {
-			case HTTPClient::STATUS_DISCONNECTED: {
-				_finish_with_result(RESULT_DISCONNECTED);
-				return PollStep::STOP;
-			}
-			case HTTPClient::STATUS_RESOLVING:
-			case HTTPClient::STATUS_CONNECTING:
-			case HTTPClient::STATUS_REQUESTING: {
-				client->poll();
-				return PollStep::KEEP_POLLING;
-			}
-			case HTTPClient::STATUS_CANT_RESOLVE: {
+			addresses = resolve_status == IP::RESOLVER_STATUS_DONE ? ip->get_resolve_item_addresses(resolve_id) : Array();
+			ip->erase_resolve_item(resolve_id);
+			resolve_id = IP::RESOLVER_INVALID_ID;
+			if (addresses.is_empty()) {
 				_finish_with_result(RESULT_CANT_RESOLVE);
 				return PollStep::STOP;
 			}
-			case HTTPClient::STATUS_CANT_CONNECT: {
+			if (!_connect_next_address()) {
 				_finish_with_result(RESULT_CANT_CONNECT);
 				return PollStep::STOP;
 			}
-			case HTTPClient::STATUS_CONNECTED: {
-				if (request_sent) {
-					// reached end of chunked transfer or standard stream (unlikely for icecast unless it disconnects)
-					_finish_with_result(RESULT_STREAM_FINISHED);
-					return PollStep::STOP;
-				}
+		}
 
-				Error err = client->request(HTTPClient::METHOD_GET, request_string, request_headers);
-				if (err != OK) {
+		if (tcp->get_status() == StreamPeerTCP::STATUS_CONNECTING) {
+			tcp->poll();
+		}
+		StreamPeerTCP::Status tcp_status = tcp->get_status();
+		if (tcp_status == StreamPeerTCP::STATUS_CONNECTING) { return PollStep::KEEP_POLLING; }
+		if (tcp_status == StreamPeerTCP::STATUS_ERROR) {
+			// like HTTPClient, a host whose first address can't be reached is tried at the next one
+			if (!request_sent && tls.is_null() && _connect_next_address()) { return PollStep::KEEP_POLLING; }
+			_finish_with_result(request_sent || tls.is_valid() ? RESULT_CONNECTION_ERROR : RESULT_CANT_CONNECT);
+			return PollStep::STOP;
+		}
+
+		Ref<StreamPeer> peer = tcp;
+		if (use_tls) {
+			if (tls.is_null()) {
+				tls.instantiate();
+				if (tls.is_null() || tls->connect_to_stream(tcp, url, tls_options) != OK) {
 					_finish_with_result(RESULT_CONNECTION_ERROR);
 					return PollStep::STOP;
 				}
-
-				request_sent = true;
-				return PollStep::KEEP_POLLING;
 			}
-			case HTTPClient::STATUS_BODY: {
-				bool response_pending;
-				{
-					std::lock_guard<std::mutex> lock(response_state_mutex);
-					response_pending = response_code == 0;
-				}
-				if (request_sent && response_pending) {
-					if (_handle_response() == PollStep::STOP) { return PollStep::STOP; }
-				}
-
-				client->poll();
-				if (client->get_status() != HTTPClient::STATUS_BODY) {
-					return PollStep::KEEP_POLLING;
-				}
-
-				chunk = client->read_response_body_chunk();
-				break;
+			// polled only during the handshake: a poll that finds the server gone drops what it already decrypted,
+			// and stations close right after short answers like redirects. Reads drain that data first
+			if (tls->get_status() == StreamPeerTLS::STATUS_HANDSHAKING) {
+				tls->poll();
 			}
-			case HTTPClient::STATUS_CONNECTION_ERROR:
-			case HTTPClient::STATUS_TLS_HANDSHAKE_ERROR: {
+			StreamPeerTLS::Status tls_status = tls->get_status();
+			if (tls_status == StreamPeerTLS::STATUS_HANDSHAKING) { return PollStep::KEEP_POLLING; }
+			if (tls_status != StreamPeerTLS::STATUS_CONNECTED) {
+				_finish_with_result(request_sent ? _closed_result(ERR_FILE_EOF) : RESULT_CONNECTION_ERROR);
+				return PollStep::STOP;
+			}
+			peer = tls;
+		} else if (tcp_status != StreamPeerTCP::STATUS_CONNECTED) {
+			_finish_with_result(_closed_result(ERR_FILE_EOF));
+			return PollStep::STOP;
+		}
+
+		if (!request_sent) {
+			// HTTP/1.0, so the server never answers with chunked encoding
+			const bool default_port = port == (use_tls ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT);
+			String head = String("GET ") + request_string + " HTTP/1.0\r\n";
+			bool has_host = false;
+			for (const String &header : request_headers) {
+				has_host = has_host || header.to_lower().begins_with("host:");
+				head += header;
+				head += "\r\n";
+			}
+			if (!has_host) {
+				head += "Host: " + url + (default_port ? String() : String(":") + String::num_int64(port)) + "\r\n";
+			}
+			if (peer->put_data((head + "\r\n").to_utf8_buffer()) != OK) {
 				_finish_with_result(RESULT_CONNECTION_ERROR);
 				return PollStep::STOP;
 			}
+			request_sent = true;
+			return PollStep::KEEP_POLLING;
 		}
+
+		// reads only what has arrived: a read that runs into the server closing reports an error and drops the
+		// data it got, which would lose the last answer of a server that replies and hangs up
+		PackedByteArray data;
+		while (data.size() < READ_CHUNK_SIZE) {
+			const int available = peer->get_available_bytes();
+			Array received = peer->get_partial_data(MIN(MAX(available, 1), READ_CHUNK_SIZE - data.size()));
+			read_error = static_cast<Error>(static_cast<int>(received[0]));
+			if (read_error != OK) { break; }
+			PackedByteArray part = received[1];
+			if (part.is_empty()) { break; }
+			data.append_array(part);
+		}
+		if (data.is_empty() && read_error == OK) { return PollStep::KEEP_POLLING; }
+
+		if (!data.is_empty()) {
+			bool response_pending;
+			{
+				std::lock_guard<std::mutex> state_lock(response_state_mutex);
+				response_pending = response_code == 0;
+			}
+			if (!response_pending) {
+				chunk = data;
+			} else if (_read_response_head(data, chunk) == PollStep::STOP) {
+				return PollStep::STOP;
+			}
+		}
+		// a redirect in this pass replaced the socket, so the old one closing is expected
+		if (tcp.is_null()) { read_error = OK; }
 	}
 
+	if (body_left >= 0 && chunk.size() > body_left) {
+		chunk.resize(body_left);
+	}
 	if (chunk.size() > 0) {
 		downloaded.add(chunk.size());
 		timeout_start_msec = Time::get_singleton()->get_ticks_msec();
 		_process_chunk(chunk);
+		if (body_left >= 0) {
+			body_left -= chunk.size();
+		}
+	}
+	// a body of known length that has all arrived is the only normal end; a live stream ends when dropped
+	if (body_left == 0) {
+		_finish_with_result(RESULT_STREAM_FINISHED);
+		return PollStep::STOP;
+	}
+	// the data that came with the error is handled first, so a server's last answer still counts
+	if (read_error != OK) {
+		_finish_with_result(_closed_result(read_error));
+		return PollStep::STOP;
 	}
 
 	return PollStep::KEEP_POLLING;
 }
 
-IcyHttpStream::PollStep IcyHttpStream::_handle_response() {
-	if (!client->has_response()) {
-		_finish_with_result(RESULT_REQUEST_FAILED);
-		return PollStep::STOP;
+IcyHttpStream::PollStep IcyHttpStream::_read_response_head(const PackedByteArray &p_data, PackedByteArray &r_body) {
+	header_bytes.append_array(p_data);
+	const uint8_t *bytes = header_bytes.ptr();
+	const int size = header_bytes.size();
+	int head_end = -1;
+	int body_start = -1;
+	for (int i = 0; i + 1 < size && head_end == -1; ++i) {
+		if (bytes[i] != '\n') { continue; }
+		if (bytes[i + 1] == '\n') {
+			head_end = i;
+			body_start = i + 2;
+		} else if (bytes[i + 1] == '\r' && i + 2 < size && bytes[i + 2] == '\n') {
+			head_end = i;
+			body_start = i + 3;
+		}
+	}
+	if (head_end == -1) {
+		if (size > MAX_HEADER_SIZE) {
+			_finish_with_result(RESULT_REQUEST_FAILED);
+			return PollStep::STOP;
+		}
+		return PollStep::KEEP_POLLING;
 	}
 
-	PackedStringArray new_headers = client->get_response_headers();
-	int new_response_code = client->get_response_code();
-	// SHOUTcast v1 answers "ICY 200 OK" instead of an HTTP status line. HTTPClient only parses a status code from
-	// a first line starting with "HTTP"; anything else is kept as an ordinary header and the code stays 0
-	if (new_response_code == 0 && new_headers.size() > 0 && new_headers[0].begins_with("ICY ")) {
-		new_response_code = new_headers[0].get_slicec(' ', 1).to_int();
+	PackedStringArray headers = decode_text(bytes, head_end).replace("\r", "").split("\n", false);
+	// "HTTP/1.0 200 OK", or "ICY 200 OK" from SHOUTcast v1
+	const int code = headers.is_empty() ? 0 : headers[0].get_slicec(' ', 1).to_int();
+	if (!headers.is_empty()) {
+		headers.remove_at(0);
 	}
+	PackedByteArray body = header_bytes.slice(body_start);
+	header_bytes.clear();
+
+	if (_handle_response(code, headers) == PollStep::STOP) { return PollStep::STOP; }
+	if (code >= 200 && code < 300) {
+		r_body = body;
+	}
+	return PollStep::KEEP_POLLING;
+}
+
+IcyHttpStream::PollStep IcyHttpStream::_handle_response(int p_response_code, const PackedStringArray &p_headers) {
 	{
 		std::lock_guard<std::mutex> lock(response_state_mutex);
-		response_headers = new_headers;
-		response_code = new_response_code;
+		response_headers = p_headers;
+		response_code = p_response_code;
 	}
 
-	const bool is_redirect = new_response_code == 301 || new_response_code == 302 || new_response_code == 303
-			|| new_response_code == 307 || new_response_code == 308;
+	const bool is_redirect = p_response_code == 301 || p_response_code == 302 || p_response_code == 303
+			|| p_response_code == 307 || p_response_code == 308;
 	if (is_redirect) {
-		return _follow_redirect(new_headers);
+		return _follow_redirect(p_headers);
 	}
 
-	if (new_response_code < 200 || new_response_code >= 300) {
+	if (p_response_code < 200 || p_response_code >= 300) {
 		_finish_with_result(RESULT_REQUEST_FAILED);
 		return PollStep::STOP;
 	}
@@ -406,11 +602,11 @@ IcyHttpStream::PollStep IcyHttpStream::_handle_response() {
 	String new_content_type;
 	int bitrate_kbps = 0;
 
-	for (int i = 0; i < new_headers.size(); ++i) {
-		const int sep = new_headers[i].find(":");
+	for (int i = 0; i < p_headers.size(); ++i) {
+		const int sep = p_headers[i].find(":");
 		if (sep == -1) { continue; }
-		const String key = new_headers[i].substr(0, sep).strip_edges().to_lower();
-		const String value = new_headers[i].substr(sep + 1).strip_edges();
+		const String key = p_headers[i].substr(0, sep).strip_edges().to_lower();
+		const String value = p_headers[i].substr(sep + 1).strip_edges();
 
 		if (key == "content-type") {
 			new_content_type = value;
@@ -418,6 +614,8 @@ IcyHttpStream::PollStep IcyHttpStream::_handle_response() {
 			icy_demuxer.reset(value.to_int());
 		} else if (key == "icy-br") {
 			bitrate_kbps = value.to_int();
+		} else if (key == "content-length") {
+			body_left = value.to_int();
 		}
 	}
 	{
@@ -467,11 +665,10 @@ IcyHttpStream::PollStep IcyHttpStream::_follow_redirect(const PackedStringArray 
 		return PollStep::STOP;
 	}
 
-	const String location_prefix = "location: ";
 	String new_request;
 	for (int i = 0; i < p_headers.size(); ++i) {
-		if (p_headers[i].to_lower().begins_with(location_prefix)) {
-			new_request = p_headers[i].substr(location_prefix.length()).strip_edges();
+		if (p_headers[i].to_lower().begins_with("location:")) {
+			new_request = p_headers[i].substr(p_headers[i].find(":") + 1).strip_edges();
 		}
 	}
 
@@ -491,7 +688,6 @@ IcyHttpStream::PollStep IcyHttpStream::_follow_redirect(const PackedStringArray 
 		request_string = new_request;
 	}
 
-	client->close();
 	Error err = _connect_socket();
 	if (err != OK) {
 		_finish_with_result(RESULT_REDIRECT_FAILED);
@@ -506,6 +702,7 @@ IcyHttpStream::PollStep IcyHttpStream::_follow_redirect(const PackedStringArray 
 	}
 	downloaded.set(0);
 	++redirections;
+	body_left = -1;
 	_reset_icy_state();
 
 	return PollStep::KEEP_POLLING;
@@ -543,16 +740,13 @@ void IcyHttpStream::_forward_data_to_decoder(const uint8_t *p_data, int p_size) 
 
 // string decoding and cleanup happen here on the worker thread, only the emit is deferred
 void IcyHttpStream::_emit_metadata_deferred(const uint8_t *p_data, int p_size) {
-	String meta_str;
-	if (meta_str.parse_utf8(reinterpret_cast<const char *>(p_data), p_size) != OK) {
-		// some SHOUTcast v1 servers send Latin-1; every byte maps to the code point of the same value
-		meta_str = String();
-		for (int i = 0; i < p_size; ++i) {
-			meta_str += String::chr(p_data[i]);
-		}
+	// icecast pads metadata with null bytes. The UTF-8 parser stops at the first, but the Latin-1 fallback would
+	// keep them, so they are cut first
+	const uint8_t *nul = static_cast<const uint8_t *>(memchr(p_data, 0, p_size));
+	if (nul != nullptr) {
+		p_size = static_cast<int>(nul - p_data);
 	}
-	// icecast pads metadata with null bytes, strip before emitting
-	String clean_meta = meta_str.strip_edges().replace(String::chr(0), "");
+	String clean_meta = decode_text(p_data, p_size).strip_edges();
 	if (!clean_meta.is_empty()) {
 		call_deferred("emit_signal", "metadata_received", clean_meta);
 	}

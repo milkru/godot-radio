@@ -1,8 +1,10 @@
 #pragma once
 
 #include "godot_cpp/classes/global_constants.hpp"
-#include "godot_cpp/classes/http_client.hpp"
+#include "godot_cpp/classes/ip.hpp"
 #include "godot_cpp/classes/ref_counted.hpp"
+#include "godot_cpp/classes/stream_peer_tcp.hpp"
+#include "godot_cpp/classes/stream_peer_tls.hpp"
 #include "godot_cpp/classes/thread.hpp"
 #include "godot_cpp/classes/tls_options.hpp"
 #include "godot_cpp/core/binder_common.hpp"
@@ -41,6 +43,7 @@ private:
 	static constexpr int POLL_INTERVAL_USEC = 10000;
 	static constexpr int READ_CHUNK_SIZE = 16384;
 	static constexpr int MAX_REDIRECTIONS = 8;
+	static constexpr int MAX_HEADER_SIZE = 16384;
 	static constexpr int DEFAULT_HTTP_PORT = 80;
 	static constexpr int DEFAULT_HTTPS_PORT = 443;
 	static constexpr double MSEC_PER_SEC = 1000.0;
@@ -64,7 +67,15 @@ private:
 	std::mutex client_mutex;
 	mutable std::mutex response_state_mutex;
 
-	Ref<HTTPClient> client;
+	// raw sockets instead of HTTPClient: a stream has no length, and HTTPClient reads such a body only when the
+	// server sends exactly "Connection: close". Many stations don't, so the request is HTTP/1.0 and the body
+	// simply runs until the server closes the connection
+	Ref<StreamPeerTCP> tcp;
+	Ref<StreamPeerTLS> tls;
+	PackedByteArray header_bytes;
+	int resolve_id = IP::RESOLVER_INVALID_ID;
+	// resolved addresses not tried yet
+	Array addresses;
 	Ref<TLSOptions> tls_options;
 	Ref<Thread> thread;
 	// guarded by decoder_mutex. The stream creates the decoder itself from the content type unless the caller
@@ -98,6 +109,8 @@ private:
 	uint64_t stall_timeout_msec = 0;
 
 	int redirections = 0;
+	// body bytes still to come when the server sent a Content-Length, -1 for a stream that runs until it closes
+	int64_t body_left = -1;
 	int port = 0;
 	bool use_tls = false;
 	bool parse_icy_metadata = false;
@@ -116,8 +129,16 @@ private:
 
 	// caller must hold client_mutex
 	Error _connect_socket();
+	// caller must hold client_mutex
+	void _close_socket();
+	// caller must hold client_mutex; false once every address failed to start connecting
+	bool _connect_next_address();
+	// why a connection ended once the request was sent, from the error that ended the read
+	Result _closed_result(Error p_read_error) const;
+	// caller must hold client_mutex; collects the response head and passes on the body bytes that follow it
+	PollStep _read_response_head(const PackedByteArray &p_data, PackedByteArray &r_body);
 	// caller must hold client_mutex; called only while response_code == 0
-	PollStep _handle_response();
+	PollStep _handle_response(int p_response_code, const PackedStringArray &p_headers);
 	// creates the decoder for p_content_type unless the caller supplied one; STOP if no decoder is registered
 	PollStep _attach_decoder(const String &p_content_type, int p_bitrate_kbps);
 	// caller must hold client_mutex
